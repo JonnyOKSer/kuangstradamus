@@ -42,7 +42,10 @@ export default function Home() {
 
       const reply = { role: 'assistant', content: data.reply }
       const proverb = data.proverb
-        ? { role: 'proverb', content: `🧧 ${data.proverb}` }
+        ? {
+            role: 'proverb',
+            content: lang === 'zh' ? `🧧 ${data.proverb.zh}` : `🧧 ${data.proverb.en}`,
+          }
         : null
 
       setMessages((prev) => [...prev, reply, ...(proverb ? [proverb] : [])])
@@ -87,7 +90,7 @@ export default function Home() {
       </div>
 
       {/* Chat thread */}
-      <div className="w-full max-w-md flex-1 overflow-y-auto mb-4 space-y-2 min-h-[50px]">
+      <div className="w-full max-w-md flex-1 overflow-y-auto mb-4 space-y-2">
         {messages.map((msg, i) => (
           <div
             key={i}
@@ -95,7 +98,7 @@ export default function Home() {
               msg.role === 'user'
                 ? 'bg-gray-200 dark:bg-gray-800 text-left'
                 : msg.role === 'proverb'
-                ? 'bg-yellow-100 dark:bg-yellow-900 italic text-center'
+                ? 'bg-yellow-100 dark:bg-yellow-800 italic text-center'
                 : 'bg-blue-100 dark:bg-blue-900 text-right'
             }`}
           >
