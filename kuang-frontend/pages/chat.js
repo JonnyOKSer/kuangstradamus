@@ -12,16 +12,26 @@ export default function ChatPage() {
     const userMessage = { text: input, role: 'user' };
     setMessages((prev) => [...prev, userMessage]);
 
-    // Replace with your backend API call
-    const res = await fetch('https://kuangstradamus.up.railway.app/api/chat', {
+    // Step 1: Trade Analysis
+    const resTrade = await fetch('https://kuangstradamus.up.railway.app/api/chat', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ message: input, lang }),
+      body: JSON.stringify({ message: input, lang, mode: 'trade' }),
     });
-    const data = await res.json();
+    const dataTrade = await resTrade.json();
+    const tradeReply = { text: dataTrade.reply, role: 'bot' };
+    setMessages((prev) => [...prev, tradeReply]);
 
-    const botReply = { text: data.reply, role: 'bot' };
-    setMessages((prev) => [...prev, botReply]);
+    // Step 2: Chinese Proverb
+    const resProverb = await fetch('https://kuangstradamus.up.railway.app/api/chat', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ message: input, lang, mode: 'proverb' }),
+    });
+    const dataProverb = await resProverb.json();
+    const proverbReply = { text: dataProverb.reply, role: 'bot' };
+    setMessages((prev) => [...prev, proverbReply]);
+
     setInput('');
   };
 

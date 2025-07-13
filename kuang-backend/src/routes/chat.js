@@ -1,35 +1,41 @@
 import express from 'express';
-import { analyzeTrade } from '../utils/tradeLogic.js'; // adjust path if needed
+import { analyzeTrade } from '../utils/tradeLogic.js'; // still used
+import { generateProverb } from '../utils/proverbLogic.js'; // new logic file
 
 const router = express.Router();
 
 router.post('/', async (req, res) => {
   try {
-    const { message, lang } = req.body;
+    const { message, lang, mode = 'trade' } = req.body;
 
-    console.log('💬 Incoming trade analysis request:', { message, lang });
+    console.log(`💬 Incoming ${mode} request:`, { message, lang });
 
     if (!message) {
       return res.status(400).json({ error: 'Missing message input' });
     }
 
-    // Run the actual trade analysis
-    const result = await analyzeTrade(message);
+    let result;
 
-    // Fallback if the analysis returns nothing
+    if (mode === 'proverb') {
+      result = await generateProverb(message);
+    } else {
+      result = await analyzeTrade(message);
+    }
+
     if (!result || typeof result !== 'string') {
-      console.warn('⚠️ No valid result from trade analysis:', result);
-      return res.status(500).json({ error: 'Trade analysis failed' });
+      console.warn('⚠️ No valid result:', result);
+      return res.status(500).json({ error: `${mode} generation failed` });
     }
 
     const reply = lang === 'zh'
-      ? `交易分析结果: ${result}`
+      ? mode === 'proverb'
+        ? `古语有云: ${result}`
+        : `交易分析结果: ${result}`
       : result;
 
-    console.log('🧠 Trade analysis result:', reply);
+    console.log('🧠 Final reply:', reply);
 
     res.json({ reply });
-
   } catch (error) {
     console.error('💥 Error in chat route:', error);
     res.status(500).json({ error: 'Internal server error' });
