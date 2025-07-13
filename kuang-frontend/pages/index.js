@@ -9,7 +9,8 @@ export default function Home() {
   const [dark, setDark] = useState(false)
   const [input, setInput] = useState('')
   const [messages, setMessages] = useState([])
-  const [players, setPlayers] = useState(null)
+  const [playerData, setPlayerData] = useState(null)
+  const [showTable, setShowTable] = useState(false)
 
   const toggleLang = () => setLang(lang === 'en' ? 'zh' : 'en')
   const toggleDark = () => setDark(!dark)
@@ -29,15 +30,17 @@ export default function Home() {
     const userMessage = { role: 'user', content: input }
     setMessages((prev) => [...prev, userMessage])
     setInput('')
+    setShowTable(false) // reset table on new input
 
     try {
-      const res = await fetch('https://kuangstradamus-production.up.railway.app/api/chat', {
+      const res = await fetch('/api/chat', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ message: input, lang }),
       })
 
       if (!res.ok) throw new Error(`Server responded with ${res.status}`)
+
       const data = await res.json()
 
       const reply = { role: 'assistant', content: data.reply }
@@ -46,58 +49,56 @@ export default function Home() {
         : null
 
       setMessages((prev) => [...prev, reply, ...(proverb ? [proverb] : [])])
-      setPlayers(data.players)
+      setPlayerData(data.players || null)
     } catch (err) {
       console.error('❌ Error calling API:', err)
-      setMessages((prev) => [...prev, { role: 'assistant', content: 'Failed to summon prophecy.' }])
+      setMessages((prev) => [
+        ...prev,
+        { role: 'assistant', content: 'Failed to summon prophecy.' },
+      ])
     }
   }
 
   const renderTable = () => {
-    if (!players || typeof players !== 'object') return null
+    if (!playerData || !playerData.teamA?.length || !playerData.teamB?.length) return null
 
-    const playerNames = Object.keys(players)
-    const headers = new Set()
-
-    playerNames.forEach(name => {
-      const teamData = players[name]
-      Object.values(teamData).forEach(metrics => {
-        Object.keys(metrics || {}).forEach(key => headers.add(key))
-      })
-    })
+    const makeRow = (p) => (
+      <tr key={p.name}>
+        <td className="border px-2 py-1">{p.name}</td>
+        <td className="border px-2 py-1">{p.team}</td>
+        <td className="border px-2 py-1">{p.pos}</td>
+        <td className="border px-2 py-1">{p.points}</td>
+        <td className="border px-2 py-1">{p.rank || '—'}</td>
+        <td className="border px-2 py-1">{p.byeWeek || '—'}</td>
+        <td className="border px-2 py-1">
+          {p.stats
+            ? Object.entries(p.stats)
+                .map(([k, v]) => `${k}: ${v}`)
+                .join(', ')
+            : '—'}
+        </td>
+      </tr>
+    )
 
     return (
-      <div className="w-full max-w-2xl overflow-x-auto border border-gray-300 dark:border-gray-700 rounded-lg mb-6 shadow">
-        <table className="w-full text-sm table-auto border-collapse">
+      <div className="w-full max-w-4xl mt-4">
+        <table className="w-full border text-sm">
           <thead>
-            <tr className="bg-gray-200 dark:bg-gray-800">
-              <th className="p-2 text-left">Player</th>
-              {[...headers].map((key) => (
-                <th key={key} className="p-2 text-center">{key}</th>
-              ))}
+            <tr className="bg-gray-100 dark:bg-gray-800">
+              <th className="border px-2 py-1">Player</th>
+              <th className="border px-2 py-1">Team</th>
+              <th className="border px-2 py-1">Position</th>
+              <th className="border px-2 py-1">Points</th>
+              <th className="border px-2 py-1">Rank</th>
+              <th className="border px-2 py-1">ByeWeek</th>
+              <th className="border px-2 py-1">Stats</th>
             </tr>
           </thead>
           <tbody>
-            {playerNames.map((name) => (
-              <tr key={name} className="border-t border-gray-200 dark:border-gray-700">
-                <td className="p-2 font-semibold">{name}</td>
-                {[...headers].map((key) => (
-                  <td key={key} className="p-2 text-center">
-                    {players[name]?.A?.[key] ?? players[name]?.B?.[key] ?? '—'}
-                  </td>
-                ))}
-              </tr>
-            ))}
+            {playerData.teamA.map(makeRow)}
+            {playerData.teamB.map(makeRow)}
           </tbody>
         </table>
-        <div className="text-center mt-4">
-          <button
-            className="px-4 py-2 bg-purple-600 text-white rounded hover:bg-purple-700 transition"
-            onClick={() => alert('🚪 Entering the Tenth Quatrain...')}
-          >
-            🌀 Enter the Tenth Quatrain
-          </button>
-        </div>
       </div>
     )
   }
@@ -108,6 +109,7 @@ export default function Home() {
         <title>{lang === 'en' ? 'Kuangstradamus' : '诺查丹玛斯'}</title>
       </Head>
 
+      {/* Top toggles */}
       <div className="flex gap-2 mb-4 self-end">
         <button onClick={toggleLang} className="border px-2 py-1 rounded text-sm">
           {lang === 'en' ? '中文' : 'EN'}
@@ -117,10 +119,12 @@ export default function Home() {
         </button>
       </div>
 
+      {/* Title */}
       <h1 className="text-3xl font-bold mb-6 text-center">
         {lang === 'en' ? 'Kuangstradamus' : '诺查丹玛斯'}
       </h1>
 
+      {/* Image */}
       <div className="w-full max-w-md mb-6">
         <Image
           src="/kuang.png"
@@ -133,6 +137,7 @@ export default function Home() {
         />
       </div>
 
+      {/* Chat thread */}
       {messages.length > 0 && (
         <div className="w-full max-w-md flex-1 overflow-y-auto mb-4 space-y-2">
           {messages.map((msg, i) => (
@@ -152,8 +157,20 @@ export default function Home() {
         </div>
       )}
 
-      {players && renderTable()}
+      {/* Reveal Button */}
+      {playerData && !showTable && (
+        <button
+          onClick={() => setShowTable(true)}
+          className="mb-4 px-4 py-2 rounded bg-indigo-500 text-white dark:bg-indigo-300 dark:text-black shadow hover:opacity-90 transition-all"
+        >
+          🎴 Enter the Tenth Quatrain
+        </button>
+      )}
 
+      {/* Data Table */}
+      {showTable && renderTable()}
+
+      {/* Chat input and button */}
       <form onSubmit={handleSubmit} className="w-full max-w-[900px] mx-auto flex flex-col gap-3">
         <textarea
           value={input}
