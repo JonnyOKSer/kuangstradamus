@@ -1,7 +1,7 @@
 import OpenAI from 'openai';
 
 const openai = new OpenAI({
-  apiKey: process.env.OPENAI_API_KEY || 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, // Railway injects this
+  apiKey: process.env.OPENAI_API_KEY || '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', // Railway injects this
 });
 
 export async function generateProverb(tradeText) {
