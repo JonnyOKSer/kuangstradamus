@@ -1,13 +1,24 @@
-export async function generateProverb(tradeText) {
-  // Later: you can hook this up to GPT API or finetuned model
-  const sampleProverbs = [
-    "When the tiger offers a goat, beware the teeth beneath the smile.",
-    "A man who trades gold for bronze will soon miss the gleam.",
-    "Even a broken sword can pierce the heart if wielded with faith.",
-    "One who sells the ox for a rooster wakes to an empty field.",
-    "If you chase two rabbits, both will escape."
-  ];
+import { Configuration, OpenAIApi } from 'openai';
 
-  const index = Math.floor(Math.random() * sampleProverbs.length);
-  return sampleProverbs[index];
+const configuration = new Configuration({
+  apiKey: process.env.OPENAI_API_KEY, // Make sure this is set in your Railway secrets
+});
+const openai = new OpenAIApi(configuration);
+
+export async function generateProverb(tradeText) {
+  const prompt = `Create a wise, poetic Chinese-style proverb based on this fantasy football trade: "${tradeText}". The proverb should sound ancient and metaphorical. Respond only with the proverb.`;
+
+  try {
+    const completion = await openai.createChatCompletion({
+      model: 'gpt-4',
+      messages: [{ role: 'user', content: prompt }],
+      temperature: 0.9,
+    });
+
+    const reply = completion.data.choices[0]?.message?.content?.trim();
+    return reply || 'A silent river hides the deepest stones.';
+  } catch (err) {
+    console.error('🧨 OpenAI proverb generation failed:', err);
+    return 'A silent river hides the deepest stones.'; // fallback
+  }
 }
