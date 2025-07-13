@@ -66,7 +66,7 @@ export default function Home() {
       <tr key={p.name}>
         <td className="border px-2 py-1">{p.name}</td>
         <td className="border px-2 py-1">{p.team}</td>
-        <td className="border px-2 py-1">{p.pos}</td>
+        <td className="border px-2 py-1">{p.pos || p.position || '—'}</td>
         <td className="border px-2 py-1">{p.points}</td>
         <td className="border px-2 py-1">{p.rank || '—'}</td>
         <td className="border px-2 py-1">{p.byeWeek || '—'}</td>
@@ -171,7 +171,7 @@ export default function Home() {
       {showTable && renderTable()}
 
       {/* Chat input and button */}
-      <form onSubmit={handleSubmit} className="w-full max-w-[900px] mx-auto flex flex-col gap-3">
+      <form onSubmit={handleSubmit} className="w-full max-w-md mx-auto flex flex-col gap-3">
         <textarea
           value={input}
           onChange={(e) => setInput(e.target.value)}
