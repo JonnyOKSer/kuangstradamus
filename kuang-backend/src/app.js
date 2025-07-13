@@ -8,7 +8,14 @@ import chatRoutes from './routes/chat.js';
 const app = express();
 const PORT = process.env.PORT || 3000;
 
-// ✅ Restrict CORS to only allow Netlify frontend
+// ✅ Handle CORS preflight explicitly
+app.options('*', cors({
+  origin: ['https://kuangstradamus.xyz'],
+  methods: ['GET', 'POST'],
+  credentials: true,
+}));
+
+// ✅ Allow main CORS requests
 app.use(cors({
   origin: ['https://kuangstradamus.xyz'],
   methods: ['GET', 'POST'],
