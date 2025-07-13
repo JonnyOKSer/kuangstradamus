@@ -1,6 +1,6 @@
 'use client'
 
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
 import Head from 'next/head'
 import Image from 'next/image'
 
@@ -8,6 +8,21 @@ export default function Home() {
   const [lang, setLang] = useState('en')
   const [input, setInput] = useState('')
   const [messages, setMessages] = useState([])
+  const [darkMode, setDarkMode] = useState(false)
+
+  // Load dark mode preference from localStorage
+  useEffect(() => {
+    const stored = localStorage.getItem('darkMode')
+    if (stored === 'true') setDarkMode(true)
+  }, [])
+
+  // Toggle dark mode and persist
+  const toggleDarkMode = () => {
+    setDarkMode(prev => {
+      localStorage.setItem('darkMode', !prev)
+      return !prev
+    })
+  }
 
   const toggleLang = () => setLang(lang === 'en' ? 'zh' : 'en')
 
@@ -37,63 +52,80 @@ export default function Home() {
   }
 
   return (
-    <div className="min-h-screen flex flex-col items-center justify-start p-4 bg-white text-black">
-      <Head>
-        <title>{lang === 'en' ? 'Kuangstradamus' : '诺查丹玛斯'}</title>
-      </Head>
+    <div className={`${darkMode ? 'dark' : ''}`}>
+      <div className="min-h-screen flex flex-col items-center justify-start px-4 py-8 bg-white text-black dark:bg-black dark:text-white transition-colors duration-300">
+        <Head>
+          <title>{lang === 'en' ? 'Kuangstradamus' : '诺查丹玛斯'}</title>
+        </Head>
 
-      <button onClick={toggleLang} className="ml-auto text-sm underline mb-2">
-        {lang === 'en' ? '中文' : 'EN'}
-      </button>
-
-      <h1 className="text-2xl font-bold mb-4 text-center">
-        {lang === 'en' ? 'Kuangstradamus' : '诺查丹玛斯'}
-      </h1>
-
-      <div className="w-full max-w-md mb-4">
-        <Image
-          src="/kuang.png"
-          alt="Kuangstradamus"
-          width={500}
-          height={600}
-          layout="responsive"
-          className="rounded-lg"
-          unoptimized
-        />
-      </div>
-
-      {/* Chat thread */}
-      <div className="w-full max-w-md flex-1 overflow-y-auto mb-4 space-y-2">
-        {messages.map((msg, i) => (
-          <div
-            key={i}
-            className={`p-2 rounded ${
-              msg.role === 'user' ? 'bg-gray-200 text-left' : 'bg-blue-100 text-right'
-            }`}
-          >
-            {msg.content}
+        <div className="w-full max-w-4xl flex flex-col items-center relative">
+          {/* Language + Dark Mode Toggle */}
+          <div className="absolute right-0 top-0 flex gap-2">
+            <button onClick={toggleLang} className="text-sm underline">
+              {lang === 'en' ? '中文' : 'EN'}
+            </button>
+            <button
+              onClick={toggleDarkMode}
+              className="text-sm underline"
+            >
+              {darkMode ? '☀️ Light' : '🌙 Dark'}
+            </button>
           </div>
-        ))}
-      </div>
 
-      {/* Chat input and button */}
-      <form onSubmit={handleSubmit} className="w-full max-w-[900px] mx-auto flex flex-col gap-3">
-        <textarea
-          value={input}
-          onChange={(e) => setInput(e.target.value)}
-          placeholder="[Test Mode Only, Use 2021 Players] Ex: Christian McCaffrey and Alvin Kamara for Blake Bortles and Antonio Brown"
-          rows={4}
-          className="w-full border border-gray-400 rounded p-3 resize-none shadow-md focus:outline-none focus:ring-2 focus:ring-fndm-green"
-        />
-        <div className="flex justify-end">
-          <button
-            type="submit"
-            className="bg-black text-white px-6 py-2 rounded hover:bg-gray-800 transition-all duration-200 shadow"
-          >
-            Summon the Prophecy
-          </button>
+          {/* Title */}
+          <h1 className="text-3xl font-extrabold mb-6 text-center">
+            {lang === 'en' ? 'Kuangstradamus' : '诺查丹玛斯'}
+          </h1>
+
+          {/* Image */}
+          <div className="w-full max-w-md mb-6">
+            <Image
+              src="/kuang.png"
+              alt="Kuangstradamus"
+              width={500}
+              height={600}
+              layout="responsive"
+              className="rounded-lg"
+              unoptimized
+            />
+          </div>
+
+          {/* Chat thread */}
+          <div className="w-full max-w-2xl flex-1 overflow-y-auto mb-6 space-y-2">
+            {messages.map((msg, i) => (
+              <div
+                key={i}
+                className={`p-3 rounded-md whitespace-pre-wrap ${
+                  msg.role === 'user'
+                    ? 'bg-gray-200 text-left dark:bg-gray-700'
+                    : 'bg-blue-100 text-right dark:bg-blue-900'
+                }`}
+              >
+                {msg.content}
+              </div>
+            ))}
+          </div>
+
+          {/* Input + Button */}
+          <form onSubmit={handleSubmit} className="w-full max-w-2xl flex flex-col gap-3">
+            <textarea
+              value={input}
+              onChange={(e) => setInput(e.target.value)}
+              placeholder="[Test Mode Only, Use 2021 Players] Ex: Christian McCaffrey and Alvin Kamara for Blake Bortles and Antonio Brown"
+              rows={4}
+              className="w-full px-4 py-3 border border-gray-300 dark:border-gray-600 rounded-lg shadow-sm resize-none bg-white dark:bg-gray-800 focus:outline-none focus:ring-2 focus:ring-fndm-green transition-all duration-200"
+            />
+            <div className="flex justify-end">
+              <button
+                type="submit"
+                className="bg-black dark:bg-white text-white dark:text-black px-6 py-2 rounded-md hover:opacity-90 shadow-lg transition-all duration-200 focus:ring-2 focus:ring-offset-2 focus:ring-fndm-green"
+              >
+                ✨ Summon the Prophecy
+              </button>
+            </div>
+          </form>
         </div>
-      </form>
+      </div>
     </div>
   )
 }
