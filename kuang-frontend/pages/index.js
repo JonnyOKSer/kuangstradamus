@@ -90,22 +90,24 @@ export default function Home() {
       </div>
 
       {/* Chat thread */}
-      <div className="w-full max-w-md flex-1 overflow-y-auto mb-4 space-y-2">
-        {messages.map((msg, i) => (
-          <div
-            key={i}
-            className={`p-2 rounded ${
-              msg.role === 'user'
-                ? 'bg-gray-200 dark:bg-gray-800 text-left'
-                : msg.role === 'proverb'
-                ? 'bg-yellow-100 dark:bg-yellow-800 italic text-center'
-                : 'bg-blue-100 dark:bg-blue-900 text-right'
-            }`}
-          >
-            {msg.content}
-          </div>
-        ))}
+{messages.length > 0 && (
+  <div className="w-full max-w-md flex-1 overflow-y-auto mb-4 space-y-2">
+    {messages.map((msg, i) => (
+      <div
+        key={i}
+        className={`p-2 rounded ${
+          msg.role === 'user'
+            ? 'bg-gray-200 dark:bg-gray-800 text-left'
+            : msg.role === 'proverb'
+            ? 'bg-yellow-100 dark:bg-yellow-800 italic text-center'
+            : 'bg-blue-100 dark:bg-blue-900 text-right'
+        }`}
+      >
+        {msg.content}
       </div>
+    ))}
+  </div>
+)}
 
       {/* Chat input and button */}
       <form onSubmit={handleSubmit} className="w-full max-w-[900px] mx-auto flex flex-col gap-3">
