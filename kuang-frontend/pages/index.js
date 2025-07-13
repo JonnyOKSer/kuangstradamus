@@ -33,7 +33,7 @@ export default function Home() {
     setShowTable(false) // reset table on new input
 
     try {
-      const res = await fetch('/api/chat', {
+      const res = await fetch('https://kuangstradamus-production.up.railway.app/api/chat', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ message: input, lang }),
