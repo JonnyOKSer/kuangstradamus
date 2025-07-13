@@ -9,6 +9,7 @@ export default function Home() {
   const [dark, setDark] = useState(false)
   const [input, setInput] = useState('')
   const [messages, setMessages] = useState([])
+  const [players, setPlayers] = useState(null)
 
   const toggleLang = () => setLang(lang === 'en' ? 'zh' : 'en')
   const toggleDark = () => setDark(!dark)
@@ -37,22 +38,68 @@ export default function Home() {
       })
 
       if (!res.ok) throw new Error(`Server responded with ${res.status}`)
-
       const data = await res.json()
 
       const reply = { role: 'assistant', content: data.reply }
       const proverb = data.proverb?.[lang]
-        ? {
-          role: 'proverb',
-          content: `🧧 ${data.proverb[lang]}`,
-          }
+        ? { role: 'proverb', content: `🧧 ${data.proverb[lang]}` }
         : null
 
       setMessages((prev) => [...prev, reply, ...(proverb ? [proverb] : [])])
+      setPlayers(data.players)
     } catch (err) {
       console.error('❌ Error calling API:', err)
       setMessages((prev) => [...prev, { role: 'assistant', content: 'Failed to summon prophecy.' }])
     }
+  }
+
+  const renderTable = () => {
+    if (!players || typeof players !== 'object') return null
+
+    const playerNames = Object.keys(players)
+    const headers = new Set()
+
+    playerNames.forEach(name => {
+      const teamData = players[name]
+      Object.values(teamData).forEach(metrics => {
+        Object.keys(metrics || {}).forEach(key => headers.add(key))
+      })
+    })
+
+    return (
+      <div className="w-full max-w-2xl overflow-x-auto border border-gray-300 dark:border-gray-700 rounded-lg mb-6 shadow">
+        <table className="w-full text-sm table-auto border-collapse">
+          <thead>
+            <tr className="bg-gray-200 dark:bg-gray-800">
+              <th className="p-2 text-left">Player</th>
+              {[...headers].map((key) => (
+                <th key={key} className="p-2 text-center">{key}</th>
+              ))}
+            </tr>
+          </thead>
+          <tbody>
+            {playerNames.map((name) => (
+              <tr key={name} className="border-t border-gray-200 dark:border-gray-700">
+                <td className="p-2 font-semibold">{name}</td>
+                {[...headers].map((key) => (
+                  <td key={key} className="p-2 text-center">
+                    {players[name]?.A?.[key] ?? players[name]?.B?.[key] ?? '—'}
+                  </td>
+                ))}
+              </tr>
+            ))}
+          </tbody>
+        </table>
+        <div className="text-center mt-4">
+          <button
+            className="px-4 py-2 bg-purple-600 text-white rounded hover:bg-purple-700 transition"
+            onClick={() => alert('🚪 Entering the Tenth Quatrain...')}
+          >
+            🌀 Enter the Tenth Quatrain
+          </button>
+        </div>
+      </div>
+    )
   }
 
   return (
@@ -61,7 +108,6 @@ export default function Home() {
         <title>{lang === 'en' ? 'Kuangstradamus' : '诺查丹玛斯'}</title>
       </Head>
 
-      {/* Top toggles */}
       <div className="flex gap-2 mb-4 self-end">
         <button onClick={toggleLang} className="border px-2 py-1 rounded text-sm">
           {lang === 'en' ? '中文' : 'EN'}
@@ -71,12 +117,10 @@ export default function Home() {
         </button>
       </div>
 
-      {/* Title */}
       <h1 className="text-3xl font-bold mb-6 text-center">
         {lang === 'en' ? 'Kuangstradamus' : '诺查丹玛斯'}
       </h1>
 
-      {/* Image */}
       <div className="w-full max-w-md mb-6">
         <Image
           src="/kuang.png"
@@ -89,27 +133,27 @@ export default function Home() {
         />
       </div>
 
-      {/* Chat thread */}
-{messages.length > 0 && (
-  <div className="w-full max-w-md flex-1 overflow-y-auto mb-4 space-y-2">
-    {messages.map((msg, i) => (
-      <div
-        key={i}
-        className={`p-2 rounded ${
-          msg.role === 'user'
-            ? 'bg-gray-200 dark:bg-gray-800 text-left'
-            : msg.role === 'proverb'
-            ? 'bg-yellow-100 dark:bg-yellow-800 italic text-center'
-            : 'bg-blue-100 dark:bg-blue-900 text-right'
-        }`}
-      >
-        {msg.content}
-      </div>
-    ))}
-  </div>
-)}
+      {messages.length > 0 && (
+        <div className="w-full max-w-md flex-1 overflow-y-auto mb-4 space-y-2">
+          {messages.map((msg, i) => (
+            <div
+              key={i}
+              className={`p-2 rounded ${
+                msg.role === 'user'
+                  ? 'bg-gray-200 dark:bg-gray-800 text-left'
+                  : msg.role === 'proverb'
+                  ? 'bg-yellow-100 dark:bg-yellow-800 italic text-center'
+                  : 'bg-blue-100 dark:bg-blue-900 text-right'
+              }`}
+            >
+              {msg.content}
+            </div>
+          ))}
+        </div>
+      )}
 
-      {/* Chat input and button */}
+      {players && renderTable()}
+
       <form onSubmit={handleSubmit} className="w-full max-w-[900px] mx-auto flex flex-col gap-3">
         <textarea
           value={input}
