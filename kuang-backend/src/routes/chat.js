@@ -16,27 +16,23 @@ router.post('/', async (req, res) => {
 
     // Run trade analysis
     const result = await analyzeTrade(message);
-    if (!result || typeof result !== 'string') {
+    if (!result || typeof result !== 'object' || !result.summary || !result.players) {
       console.warn('⚠️ Invalid trade result:', result);
       return res.status(500).json({ error: 'Trade analysis failed' });
     }
 
-    // Run proverb generation
+    // Generate proverb
     const proverbText = await generateProverb(message);
-    const formattedProverb =
-      lang === 'zh'
-        ? `古语有云: ${proverbText}`
-        : proverbText;
+    const proverb = {
+      en: proverbText,
+      zh: `古语有云: ${proverbText}`,
+    };
 
-    const reply =
-      lang === 'zh'
-        ? `交易分析结果: ${result}`
-        : result;
+    const reply = lang === 'zh'
+      ? `交易分析结果: ${result.summary}`
+      : result.summary;
 
-    console.log('🧠 Reply:', reply);
-    console.log('🀄 Proverb:', formattedProverb);
-
-    res.json({ reply, proverb: { [lang]: formattedProverb } });
+    res.json({ reply, proverb, players: result.players });
   } catch (error) {
     console.error('💥 Error in chat route:', error);
     res.status(500).json({ error: 'Internal server error' });
