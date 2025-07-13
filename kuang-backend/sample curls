@@ -1,0 +1,3 @@
+curl -X POST http://localhost:3000/api/trade \
+  -H "Content-Type: application/json" \
+  -d '{"teamA":["Christian McCaffrey","Tyreek Hill"],"teamB":["Stefon Diggs","Alvin Kamara"]}'
