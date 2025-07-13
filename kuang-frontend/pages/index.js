@@ -39,7 +39,13 @@ export default function Home() {
       if (!res.ok) throw new Error(`Server responded with ${res.status}`)
 
       const data = await res.json()
-      setMessages((prev) => [...prev, { role: 'assistant', content: data.reply }])
+
+      const reply = { role: 'assistant', content: data.reply }
+      const proverb = data.proverb
+        ? { role: 'proverb', content: `🧧 ${data.proverb}` }
+        : null
+
+      setMessages((prev) => [...prev, reply, ...(proverb ? [proverb] : [])])
     } catch (err) {
       console.error('❌ Error calling API:', err)
       setMessages((prev) => [...prev, { role: 'assistant', content: 'Failed to summon prophecy.' }])
@@ -81,13 +87,15 @@ export default function Home() {
       </div>
 
       {/* Chat thread */}
-      <div className="w-full max-w-md flex-1 overflow-y-auto mb-4 space-y-2">
+      <div className="w-full max-w-md flex-1 overflow-y-auto mb-4 space-y-2 min-h-[50px]">
         {messages.map((msg, i) => (
           <div
             key={i}
             className={`p-2 rounded ${
               msg.role === 'user'
                 ? 'bg-gray-200 dark:bg-gray-800 text-left'
+                : msg.role === 'proverb'
+                ? 'bg-yellow-100 dark:bg-yellow-900 italic text-center'
                 : 'bg-blue-100 dark:bg-blue-900 text-right'
             }`}
           >
