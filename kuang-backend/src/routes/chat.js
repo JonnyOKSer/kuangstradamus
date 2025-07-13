@@ -16,9 +16,9 @@ router.post('/', async (req, res) => {
 
     // Run trade analysis
     const result = await analyzeTrade(message);
-    if (!result || typeof result !== 'object' || !result.summary || !result.players) {
-      console.warn('⚠️ Invalid trade result:', result);
-      return res.status(500).json({ error: 'Trade analysis failed' });
+    if (!result || typeof result !== 'object' || typeof result.summary !== 'string') {
+        console.warn('⚠️ Invalid trade result:', result);
+        return res.status(500).json({ error: 'Trade analysis failed' });
     }
 
     // Generate proverb
