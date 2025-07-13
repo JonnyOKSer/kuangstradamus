@@ -114,7 +114,11 @@ export default function Home() {
         <textarea
           value={input}
           onChange={(e) => setInput(e.target.value)}
-          placeholder="[Test Mode Only, Use 2021 Players] Ex: Christian McCaffrey and Alvin Kamara for Blake Bortles and Antonio Brown"
+          placeholder={
+            lang === 'zh'
+              ? '【测试模式】请输入交易：例如 克里斯蒂安·麦卡弗里 和 阿尔文·卡马拉 换 布雷克·博特尔斯 和 安东尼奥·布朗'
+              : '[Test Mode Only, Use 2021 Players] Ex: Christian McCaffrey and Alvin Kamara for Blake Bortles and Antonio Brown'
+          }
           rows={4}
           className="w-full border border-gray-400 dark:border-gray-600 rounded p-3 resize-none shadow-md focus:outline-none focus:ring-2 focus:ring-fndm-green bg-white dark:bg-gray-900"
         />
