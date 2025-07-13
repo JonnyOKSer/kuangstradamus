@@ -1,6 +1,6 @@
+import 'dotenv/config';
 import express from 'express';
 import cors from 'cors';
-import 'dotenv/config';
 
 import tradeRoutes from './routes/trade.js';
 import chatRoutes from './routes/chat.js';
