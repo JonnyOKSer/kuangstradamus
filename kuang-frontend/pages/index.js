@@ -41,10 +41,10 @@ export default function Home() {
       const data = await res.json()
 
       const reply = { role: 'assistant', content: data.reply }
-      const proverb = data.proverb
+      const proverb = data.proverb?.[lang]
         ? {
-            role: 'proverb',
-            content: lang === 'zh' ? `🧧 ${data.proverb.zh}` : `🧧 ${data.proverb.en}`,
+          role: 'proverb',
+          content: `🧧 ${data.proverb[lang]}`,
           }
         : null
 
