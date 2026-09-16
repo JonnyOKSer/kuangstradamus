@@ -566,8 +566,19 @@ export function gatedPlayer(id, week, ctx, weekCtx) {
     isHome: game?.isHome ?? null,
   });
 
+  const usage = trends?.form?.get(String(id)) || null;
+
   return {
     ...base,
+    usage: usage && usage.gamesPlayed
+      ? {
+        games: usage.gamesPlayed,
+        pointsPerGame: usage.recentPPG,
+        targetsPerGame: usage.targetsPerGame,
+        touchesPerGame: usage.touchesPerGame,
+        snapShare: usage.snapShareLast ?? usage.snapShare,
+      }
+      : null,
     baseProjection: result.base,
     points: result.adjusted, // the optimizer runs on the gated number
     adjusted: result.adjusted,
@@ -582,6 +593,30 @@ export function gatedPlayer(id, week, ctx, weekCtx) {
     isHome: game?.isHome ?? null,
     kickoff: game?.date || null,
     weather: weekCtx?.weather?.get(base.team) || null,
+  };
+}
+
+/**
+ * Flag the case where the player being benched has been the more used of the
+ * two — more targets, more touches, or a bigger snap share. Returns null when
+ * there is no tension or no usage on file.
+ */
+function usageConflict(out, incoming) {
+  const a = out?.usage;
+  const b = incoming?.usage;
+  if (!a || !b) return null;
+  const bits = [];
+  if (a.targetsPerGame > b.targetsPerGame + 0.5) bits.push(`${a.targetsPerGame} targets/gm to ${b.targetsPerGame}`);
+  if (a.touchesPerGame > b.touchesPerGame + 0.5) bits.push(`${a.touchesPerGame} touches/gm to ${b.touchesPerGame}`);
+  if (a.snapShare != null && b.snapShare != null && a.snapShare > b.snapShare + 0.05) {
+    bits.push(`${Math.round(a.snapShare * 100)}% of snaps to ${Math.round(b.snapShare * 100)}%`);
+  }
+  if (!bits.length) return null;
+  const sample = `${a.games} game${a.games === 1 ? '' : 's'}`;
+  return {
+    text: `${out.name} has had the bigger role so far — ${bits.join(', ')} over ${sample}. The projection still favours ${incoming.name}; usage has not reliably beaten it in backtests, so this is your call.`,
+    benchedUsage: a,
+    startedUsage: b,
   };
 }
 
@@ -603,60 +638,84 @@ export function gatedLineupReport(team, week, ctx, weekCtx) {
     const id = String((team.starters || [])[i] ?? '');
     return EMPTY.has(id) ? '' : id;
   });
-  const recommended = currentIds.slice();
+  const currentSet = new Set(currentIds.filter(Boolean));
+
+  // Only a player who is not already starting can be a challenger. Comparing
+  // slot by slot treated a reshuffle between two starters as two competing
+  // swaps, which is how the report came to say both "kept Etienne over Dowdle"
+  // and "kept Dowdle over Etienne" — neither man was ever going to sit.
+  const optimalIds = new Set(optimal.starters.filter((x) => x.player).map((x) => String(x.player.id)));
+  const incoming = optimal.starters
+    .map((x, i) => (x.player ? { slot: slots[i], player: byId.get(String(x.player.id)) } : null))
+    .filter((x) => x?.player && !currentSet.has(x.player.id))
+    .sort((a, b) => b.player.points - a.player.points);
+  const outgoing = [...currentSet]
+    .filter((id) => !optimalIds.has(id))
+    .map((id) => byId.get(id))
+    .filter(Boolean)
+    .sort((a, b) => a.points - b.points); // weakest starter is the first to go
+
   const moves = [];
   const held = [];
+  const approvedIn = new Set();
+  const approvedOut = new Set();
 
-  const candidates = slots.map((slot, i) => {
-    const incumbent = currentIds[i] ? byId.get(currentIds[i]) || null : null;
-    const proposed = optimal.starters[i]?.player ? byId.get(String(optimal.starters[i].player.id)) : null;
-    return { slot, i, incumbent, proposed };
-  }).filter((c) => c.proposed && (!c.incumbent || c.incumbent.id !== c.proposed.id));
-
-  // Best edges first, so a limited set of swaps takes the most valuable ones.
-  candidates.sort((a, b) => (b.proposed.points - (b.incumbent?.points ?? 0)) - (a.proposed.points - (a.incumbent?.points ?? 0)));
-
-  for (const c of candidates) {
-    const verdict = challengeStarter({ incumbent: c.incumbent, challenger: c.proposed, minGain: MIN_LINEUP_GAIN * scaleOf(ctx) });
+  incoming.forEach((cand, k) => {
+    const incumbent = outgoing[k] || null; // beyond this, the slot was empty
+    const verdict = challengeStarter({ incumbent, challenger: cand.player, minGain: MIN_LINEUP_GAIN * scaleOf(ctx) });
     if (!verdict.swap) {
       held.push({
-        slot: c.slot,
-        keep: c.incumbent?.name ?? null,
-        over: c.proposed.name,
+        slot: cand.slot,
+        keep: incumbent?.name ?? null,
+        over: cand.player.name,
         reason: verdict.reason,
         gain: verdict.gain ?? null,
+        bar: verdict.bar ?? null,
       });
-      continue;
+      return;
     }
-    if (c.proposed.id && recommended.includes(c.proposed.id)) continue; // already starting elsewhere
-    recommended[c.i] = c.proposed.id;
+    approvedIn.add(cand.player.id);
+    if (incumbent) approvedOut.add(incumbent.id);
     moves.push({
       action: 'swap',
-      slot: c.slot,
+      slot: cand.slot,
       in: {
-        id: c.proposed.id,
-        name: c.proposed.name,
-        position: c.proposed.position,
-        team: c.proposed.team,
-        opponent: c.proposed.opponent,
-        baseProjection: c.proposed.baseProjection,
-        projection: c.proposed.points,
-        confidence: c.proposed.confidence,
-        why: c.proposed.reasons,
-        weather: c.proposed.weather?.summary ?? null,
+        id: cand.player.id,
+        name: cand.player.name,
+        position: cand.player.position,
+        team: cand.player.team,
+        opponent: cand.player.opponent,
+        baseProjection: cand.player.baseProjection,
+        projection: cand.player.points,
+        confidence: cand.player.confidence,
+        usage: cand.player.usage,
+        why: cand.player.reasons,
+        weather: cand.player.weather?.summary ?? null,
       },
-      out: c.incumbent && {
-        id: c.incumbent.id,
-        name: c.incumbent.name,
-        baseProjection: c.incumbent.baseProjection,
-        projection: c.incumbent.points,
-        reason: c.incumbent.blocked ? c.incumbent.reasonText : (c.incumbent.reasons[0] || 'lower gated projection'),
+      out: incumbent && {
+        id: incumbent.id,
+        name: incumbent.name,
+        baseProjection: incumbent.baseProjection,
+        projection: incumbent.points,
+        reason: incumbent.blocked ? incumbent.reasonText : (incumbent.reasons[0] || 'lower gated projection'),
+        usage: incumbent.usage,
       },
+      // The projection is the projection, but if the man being benched is the
+      // one actually getting the ball, that is worth saying out loud rather
+      // than burying. Backtesting says usage does not reliably beat the
+      // projection, so this informs the call instead of overriding it.
+      usageConflict: usageConflict(incumbent, cand.player),
       gain: verdict.gain,
       bar: verdict.bar ?? null,
       reason: verdict.reason,
     });
-  }
+  });
+
+  // Re-solve over exactly the players we approved, so the lineup we recommend
+  // is slot-legal rather than a hand-patched copy of the current one.
+  const pool = players.filter((p) => (currentSet.has(p.id) && !approvedOut.has(p.id)) || approvedIn.has(p.id));
+  const solved = optimizeLineup({ rosterPositions: ctx.imported.league.rosterPositions, players: pool });
+  const recommended = solved.starters.map((x) => (x.player ? String(x.player.id) : ''));
 
   const sumOf = (ids) => r2(ids.reduce((s, id) => s + (byId.get(id)?.points ?? 0), 0));
   const baseSumOf = (ids) => r2(ids.reduce((s, id) => s + (byId.get(id)?.baseProjection ?? 0), 0));

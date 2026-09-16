@@ -561,6 +561,11 @@ function LineupCard({ lineup, autoSet }) {
                   {m.bar != null && <> · {t(`cleared a ${fmt(m.bar)}-pt bar`, `越过 ${fmt(m.bar)} 分门槛`)}</>}
                 </p>
                 {m.out?.reason && <p className="text-xs text-ink-500 dark:text-ink-400">{t('Benching', '替下')} {m.out.name}: {m.out.reason}</p>}
+                {m.usageConflict && (
+                  <p className="mt-1 rounded-sm border border-paper-400 dark:border-ink-600 bg-paper-200/60 dark:bg-ink-800/60 px-2 py-1 text-xs">
+                    ⚠️ {m.usageConflict.text}
+                  </p>
+                )}
                 {m.in.why?.length > 0 && <p className="text-xs text-ink-500 dark:text-ink-400">{t('Why:', '理由：')} {m.in.why.join(' · ')}</p>}
                 {m.in.weather && <p className="text-xs text-ink-500 dark:text-ink-400">🌦 {m.in.weather}</p>}
               </li>
@@ -576,7 +581,9 @@ function LineupCard({ lineup, autoSet }) {
           </summary>
           <ul className="mt-2 space-y-1 text-xs text-ink-500 dark:text-ink-300">
             {lineup.held.map((h, i) => (
-              <li key={i}>{h.slot}: {t('kept', '保留')} <b>{h.keep}</b> {t('over', '而非')} {h.over} — {h.reason}</li>
+              <li key={i}>
+                {h.slot}: {t('kept', '保留')} <b>{h.keep || t('the empty slot', '空位')}</b> {t('over', '而非')} {h.over} — {h.reason}
+              </li>
             ))}
           </ul>
         </details>

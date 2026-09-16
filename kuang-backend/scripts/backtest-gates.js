@@ -31,6 +31,7 @@ import { runGates } from '../src/domain/gates.js';
 const SEASON = process.argv[2] || '2025';
 const FROM_WEEK = Number(process.argv[3] || 4);   // needs prior weeks for trends
 const TO_WEEK = Number(process.argv[4] || 17);
+const LOOKBACK = Number(process.argv[5] || 5);
 const MIN_PROJECTION = 5;                          // below this the ratio is noise
 const POSITIONS = ['QB', 'RB', 'WR', 'TE', 'K'];
 const GATES = ['role', 'form', 'matchup', 'weather', 'gameScript'];
@@ -51,7 +52,7 @@ async function collect() {
     const [projections, actuals, trends, games] = await Promise.all([
       getWeeklyProjections(SEASON, week),
       getWeeklyStats(SEASON, week),
-      buildTrendTables({ season: SEASON, throughWeek: week - 1, lookback: 5, scorer: ppr }),
+      buildTrendTables({ season: SEASON, throughWeek: week - 1, lookback: LOOKBACK, scorer: ppr }),
       gamesByTeam(SEASON, week),
     ]);
 
