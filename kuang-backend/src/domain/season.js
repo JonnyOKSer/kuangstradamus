@@ -6,6 +6,7 @@
 import { optimizeLineup, diffLineups } from './lineup.js';
 import { playerValue, CORE_POSITIONS, FLEX_ELIGIBILITY, starterSlots } from './valuation.js';
 import { runGates, challengeStarter } from './gates.js';
+import { estimateFaab } from './faab.js';
 import { defenseVs } from '../services/nfl/usage.js';
 
 const r2 = (x) => Number((x ?? 0).toFixed(2));
@@ -409,7 +410,8 @@ export function waiverTargets(ctx, rosterId, trending = [], limit = 12, { needBy
   for (const t of imported.teams) for (const id of [...(t.players || []), ...(t.reserve || []), ...(t.taxi || [])]) rostered.add(String(id));
   const trendMap = new Map((trending || []).map((t) => [String(t.player_id), t.count]));
   const myTeam = imported.teams.find((t) => t.rosterId === Number(rosterId));
-  const mine = (myTeam?.players || []).map((id) => valuedPlayer(id, ctx));
+  const reserve = new Set((myTeam?.reserve || []).map(String));
+  const mine = (myTeam?.players || []).map((id) => ({ ...valuedPlayer(id, ctx), onIR: reserve.has(String(id)) }));
   const need = myTeam ? startersByPositionFor(myTeam, ctx) : {};
   const weakestStarterAt = {};
   const byPos = {};
@@ -418,11 +420,22 @@ export function waiverTargets(ctx, rosterId, trending = [], limit = 12, { needBy
     const list = (byPos[pos] || []).sort((a, b) => b.vorp - a.vorp);
     weakestStarterAt[pos] = list[Math.min(list.length, need[pos] || 0) - 1] || null;
   }
-  const dropCandidates = mine
-    .filter((p) => posOf(ctx).includes(p.position))
-    .filter((p) => !['K', 'DEF'].includes(p.position) || mine.filter((x) => x.position === p.position).length > 1)
-    .sort((a, b) => a.vorp - b.vorp)
-    .slice(0, 3);
+  // What comparable players have actually gone for in this league this season.
+  const myBudget = ctx.imported.league.waiverBudget;
+  const myRemaining = myBudget ? myBudget - (myTeam?.record?.waiverBudgetUsed ?? 0) : null;
+  const faabFor = (valuePct) => (ctx.faab
+    ? estimateFaab({ valuePct, history: ctx.faab.bids, budget: ctx.faab.budget, remaining: myRemaining })
+    : null);
+
+  // Drop candidates were sorted on vorp, which floors at zero — so every
+  // below-replacement player tied at 0.0 and the "worst three" were whoever
+  // happened to come first in the roster array. Rank on the unclamped number,
+  // and only suggest dropping someone the waiver wire can actually beat.
+  const dedicated = {};
+  for (const slot of starterSlots(ctx.imported.league.rosterPositions)) {
+    if (CORE_POSITIONS.includes(slot)) dedicated[slot] = (dedicated[slot] || 0) + 1;
+  }
+  const countAt = (pos) => mine.filter((x) => x.position === pos).length;
 
   const fa = [];
   for (const [id, proj] of leaguePts) {
@@ -458,7 +471,49 @@ export function waiverTargets(ctx, rosterId, trending = [], limit = 12, { needBy
     });
   }
   fa.sort((a, b) => b.score - a.score);
-  return { targets: fa.slice(0, limit), dropCandidates: dropCandidates.map((p) => ({ id: p.id, name: p.name, position: p.position, vorp: p.vorp, ros: p.ros })) };
+
+  // The best thing actually available sets the bar: dropping someone only
+  // makes sense if the wire holds an upgrade on him.
+  const bestAt = {};
+  for (const p of fa) {
+    if (!bestAt[p.position] || p.rawVorp > bestAt[p.position].rawVorp) bestAt[p.position] = p;
+  }
+  const dropCandidates = mine
+    .filter((p) => posOf(ctx).includes(p.position))
+    .filter((p) => !p.onIR)
+    // never leave a mandatory slot uncovered
+    .filter((p) => countAt(p.position) > (dedicated[p.position] || 0))
+    // Only name someone the wire can actually replace at his own position.
+    // "Drop Justin Herbert" with no better quarterback available is not advice.
+    .filter((p) => bestAt[p.position] && bestAt[p.position].rawVorp > p.rawVorp)
+    .sort((a, b) => a.rawVorp - b.rawVorp)
+    .slice(0, 3)
+    .map((p) => ({
+      id: p.id,
+      name: p.name,
+      position: p.position,
+      vorp: p.vorp,
+      rawVorp: p.rawVorp,
+      ros: p.ros,
+      // Name the best free agent at his own position, so the swap is concrete.
+      replacedBy: bestAt[p.position] && bestAt[p.position].rawVorp > p.rawVorp
+        ? {
+          id: bestAt[p.position].id,
+          name: bestAt[p.position].name,
+          position: p.position,
+          ros: bestAt[p.position].ros,
+          gain: r2(bestAt[p.position].rawVorp - p.rawVorp),
+        }
+        : null,
+    }));
+
+  // Percentile by value within the pool actually available, which is the
+  // comparison the estimator needs.
+  const byValue = [...fa].sort((a, b) => a.rawVorp - b.rawVorp);
+  const pctById = new Map(byValue.map((p, i) => [p.id, byValue.length === 1 ? 0.5 : i / (byValue.length - 1)]));
+  for (const p of fa) p.faab = faabFor(pctById.get(p.id));
+
+  return { valuePctById: pctById, targets: fa.slice(0, limit), dropCandidates };
 }
 
 /** Current vs optimal lineup for a team and week. */

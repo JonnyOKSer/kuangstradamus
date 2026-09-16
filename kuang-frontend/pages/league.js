@@ -317,6 +317,7 @@ function TeamView({ team, positions }) {
   const { t } = useUI()
   const { lineup, keyDates: dates } = team
   const sleepers = team.waivers?.sleepers || []
+  const faab = team.league?.faab?.enabled ? team.league.faab : null
 
   return (
     <>
@@ -392,17 +393,50 @@ function TeamView({ team, positions }) {
       {team.waivers?.targets?.length > 0 && (
         <Card title={t('Waiver targets', '自由球员')} char="补" subtitle={t('Ranked by positional need, then rest-of-season value', '按位置需求与剩余赛季价值排序')}>
           <DataTable
-            head={[t('Player', '球员'), t('Pos', '位置'), t('Team', '球队'), t('ROS pts', '剩余分'), t('vs repl.', '高于替补'), t('Next wk', '下周'), t('Need', '需求'), t('Trending', '热度'), t('Upgrade over', '可替换')]}
+            head={[
+              t('Player', '球员'), t('Pos', '位置'), t('Team', '球队'), t('ROS pts', '剩余分'), t('vs repl.', '高于替补'), t('Next wk', '下周'),
+              ...(faab ? [t('FAAB est.', 'FAAB 估价')] : []),
+              t('Need', '需求'), t('Trending', '热度'), t('Upgrade over', '可替换'),
+            ]}
             rows={team.waivers.targets.map((w) => [
               <b key="n">{w.name}</b>, w.position, w.team, fmt(w.ros), <Delta key="d" v={w.rawVorp} />, fmt(w.nextWeekPoints),
+              ...(faab ? [<Faab key="f" est={w.faab} />] : []),
               w.priority === 'low' ? '—' : <Pill key="p" tone="accent">{w.priority}</Pill>,
               w.trendingAdds ? w.trendingAdds.toLocaleString() : '—',
               w.upgradeOver ? `${w.upgradeOver.name} (+${fmt(w.upgradeOver.gain)})` : '—',
             ])}
-            caption={team.waivers.dropCandidates?.length
-              ? `${t('Drop candidates:', '可考虑释出：')} ${team.waivers.dropCandidates.map((d) => `${d.name} (${d.position}, ${fmt(d.vorp)})`).join(' · ')}`
-              : null}
           />
+
+          {faab && (
+            <p className="mt-2 text-xs text-ink-500 dark:text-ink-400">
+              {t(
+                `FAAB estimates come from the ${faab.wonSeen} winning bids in your league this season (budget $${faab.budget}), matched to where each target ranks among the free agents available now. Early-season bidding runs hot, so read them as an upper guide later in the year.`,
+                `FAAB 估价来自本赛季联盟 ${faab.wonSeen} 次成交出价（预算 $${faab.budget}），按目标在当前自由球员中的排名匹配。赛季初出价偏高，后期请作为上限参考。`,
+              )}
+            </p>
+          )}
+
+          {team.waivers.dropCandidates?.length > 0 && (
+            <div className="mt-4">
+              <SectionTitle char="舍">{t('Drop candidates', '可考虑释出')}</SectionTitle>
+              <ul className="space-y-1 text-sm">
+                {team.waivers.dropCandidates.map((d) => (
+                  <li key={d.id} className="flex flex-wrap items-baseline gap-x-2">
+                    <span>
+                      {t('Drop', '释出')} <b>{d.name}</b>
+                      <span className="text-ink-500 dark:text-ink-400"> ({d.position}, {fmt(d.ros)} {t('ROS', '剩余分')})</span>
+                    </span>
+                    <span className="text-ink-400">→</span>
+                    <span>
+                      {t('add', '签下')} <b>{d.replacedBy.name}</b>
+                      <span className="text-ink-500 dark:text-ink-400"> ({fmt(d.replacedBy.ros)} {t('ROS', '剩余分')})</span>
+                      <span className="ml-1 nums text-jade-700 dark:text-jade-400">+{fmt(d.replacedBy.gain)}</span>
+                    </span>
+                  </li>
+                ))}
+              </ul>
+            </div>
+          )}
         </Card>
       )}
     </>
@@ -622,6 +656,7 @@ function SleeperCard({ sleepers }) {
             <p className="mt-0.5 text-xs text-ink-400 dark:text-ink-500 nums">
               {t('Would inherit', '可继承')} ~{fmt(s.contingentPointsPerGame)} {t('pts/gm', '分/场')} · {t('own ROS', '自身剩余分')} {fmt(s.rosPoints)}
               {s.sampleGames ? ` · ${t(`${s.sampleGames}-game sample`, `${s.sampleGames} 场样本`)}` : ''}
+              {s.faab?.low != null && <> · FAAB <Faab est={s.faab} /></>}
             </p>
           </li>
         ))}

@@ -2,12 +2,14 @@
 // context (import + projections scored with that league's rules + replacement
 // levels) and exposes the report shapes the routes return.
 
-import { importLeague } from './sleeper/league.js';
+import { importLeague, getTransactions } from './sleeper/league.js';
 import { loadPlayers, getTrending } from './sleeper/players.js';
 import { buildRosTable, DEFAULT_LAST_WEEK } from './sleeper/projections.js';
 import { computeReplacementLevels, playerFlags, activePositions } from '../domain/valuation.js';
 import { rosLeaguePoints, describeScoring } from '../domain/scoring.js';
 import { auditScoring, calibrationInfo } from '../domain/statDerivation.js';
+import { collectBidHistory, isFaabLeague, estimateFaab } from '../domain/faab.js';
+import { playerValue } from '../domain/valuation.js';
 import { buildTrendTables } from './nfl/usage.js';
 import { byeWeeksByTeam } from './nfl/schedule.js';
 import { weekContext } from './nfl/context.js';
@@ -82,8 +84,13 @@ async function build(leagueId) {
     }).catch(() => null)
     : null;
 
+  // What this league has actually paid on waivers this season. Only worth
+  // fetching where bids exist — a rolling-priority league has none.
+  const faab = isFaabLeague(imported.league) ? await loadBidHistory(imported, leaguePts, levels) : null;
+
   return {
     imported,
+    faab,
     playersById: byId,
     ros,
     leaguePts,
@@ -97,6 +104,29 @@ async function build(leagueId) {
     scoringAudit: auditScoring(scoring, projectedKeys),
     scoringDescription: describeScoring(scoring),
     builtAt: Date.now(),
+  };
+}
+
+async function loadBidHistory(imported, leaguePts, levels) {
+  const weeks = [];
+  for (let w = 1; w <= Math.max(1, imported.currentWeek); w++) weeks.push(w);
+  const lists = await Promise.all(weeks.map((w) => getTransactions(imported.league.id, w).catch(() => [])));
+  const byWeek = {};
+  weeks.forEach((w, i) => { byWeek[w] = lists[i] || []; });
+
+  // A claim's "value" is the player's worth today, which is the best proxy
+  // available for what he looked like when the bid was placed.
+  const valueOf = (id) => {
+    const proj = leaguePts.get(String(id));
+    if (!proj) return null;
+    return playerValue(proj.total, proj.position, levels).rawVorp;
+  };
+  const bids = collectBidHistory(byWeek, valueOf);
+  return {
+    bids,
+    budget: imported.league.waiverBudget,
+    claimsSeen: bids.length,
+    wonSeen: bids.filter((b) => b.won).length,
   };
 }
 
@@ -119,6 +149,9 @@ function leagueHeader(ctx) {
     usesKicker: ctx.activePositions.includes('K'),
     usesDefense: ctx.activePositions.includes('DEF'),
     scoringAudit: ctx.scoringAudit,
+    faab: ctx.faab
+      ? { budget: ctx.faab.budget, claimsSeen: ctx.faab.claimsSeen, wonSeen: ctx.faab.wonSeen, enabled: true }
+      : { enabled: false },
     bonusCalibration: calibrationInfo(),
     dataFreshness: {
       leagueBuiltAt: new Date(ctx.builtAt).toISOString(),
@@ -209,7 +242,22 @@ export async function teamReport(leagueId, rosterId, { week } = {}) {
   const waiverPool = ctx.isCurrent
     ? season.waiverTargets(ctx, team.rosterId, trending, 80, { needByPosition: myStrength })
     : { targets: [], dropCandidates: [] };
-  const waivers = { ...waiverPool, targets: waiverPool.targets.slice(0, 12) };
+  // The percentile map covers the whole free-agent pool; sleepers are drawn
+  // from the same pool, so they can be priced on the same scale.
+  const { valuePctById, ...waiverRest } = waiverPool;
+  const waivers = { ...waiverRest, targets: waiverPool.targets.slice(0, 12) };
+
+  if (ctx.faab && valuePctById) {
+    const remaining = ctx.imported.league.waiverBudget - (team.record?.waiverBudgetUsed ?? 0);
+    for (const s of sleepers) {
+      s.faab = estimateFaab({
+        valuePct: valuePctById.get(s.id) ?? 0.5,
+        history: ctx.faab.bids,
+        budget: ctx.faab.budget,
+        remaining,
+      });
+    }
+  }
 
   const dates = ctx.isCurrent ? keyDates(team, ctx, { freeAgents: waiverPool.targets }) : null;
   const deadlinePassed = !!dates?.tradeDeadline?.passed;
