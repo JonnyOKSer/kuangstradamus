@@ -12,6 +12,8 @@ export const TTL = {
   state: 10 * 60 * 1000,
   league: 10 * 60 * 1000,
   trending: 60 * 60 * 1000,
+  schedule: 12 * 60 * 60 * 1000, // home/away + dates, fixed once the season starts
+  weather: 3 * 60 * 60 * 1000,   // forecasts move; re-ask a few times a day
 };
 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
@@ -68,6 +70,19 @@ export async function fetchJson(url, { ttl = 0, init } = {}) {
 
 export function clearCache() {
   cache.clear();
+}
+
+/**
+ * Drop every cached entry whose URL contains `needle`. Used by the daily
+ * refresh so projections/stats/weather are re-fetched without evicting the
+ * 14 MB player dump.
+ */
+export function clearCacheMatching(needle) {
+  let dropped = 0;
+  for (const url of [...cache.keys()]) {
+    if (url.includes(needle)) { cache.delete(url); dropped++; }
+  }
+  return dropped;
 }
 
 export function cacheStats() {
