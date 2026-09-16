@@ -133,6 +133,10 @@ async function loadBidHistory(imported, leaguePts, levels) {
   };
 }
 
+// How many waiver targets the UI shows. Drop advice may only name players
+// from this slice, so every suggested add is visible in the table.
+const WAIVER_DISPLAY_LIMIT = 12;
+
 const pick = (obj, keys) => Object.fromEntries(keys.filter((k) => k in obj).map((k) => [k, obj[k]]));
 
 function leagueHeader(ctx) {
@@ -243,12 +247,12 @@ export async function teamReport(leagueId, rosterId, { week } = {}) {
   // A wide pool so the calendar can answer "who can cover that bye?" at any
   // position, even though only the top of it is shown as waiver targets.
   const waiverPool = ctx.isCurrent
-    ? season.waiverTargets(ctx, team.rosterId, trending, 80, { needByPosition: myStrength })
+    ? season.waiverTargets(ctx, team.rosterId, trending, 80, { needByPosition: myStrength, displayLimit: WAIVER_DISPLAY_LIMIT })
     : { targets: [], dropCandidates: [] };
   // The percentile map covers the whole free-agent pool; sleepers are drawn
   // from the same pool, so they can be priced on the same scale.
   const { valuePctById, ...waiverRest } = waiverPool;
-  const waivers = { ...waiverRest, targets: waiverPool.targets.slice(0, 12) };
+  const waivers = { ...waiverRest, targets: waiverPool.targets };
 
   if (ctx.faab && valuePctById) {
     const remaining = ctx.imported.league.waiverBudget - (team.record?.waiverBudgetUsed ?? 0);

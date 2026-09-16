@@ -406,7 +406,7 @@ export function tradeTargets(ctx, rosterId, limit = 6) {
  * the team's current starter at that position is (need), rest-of-season points,
  * and only then the crowd's trending adds.
  */
-export function waiverTargets(ctx, rosterId, trending = [], limit = 12, { needByPosition = null } = {}) {
+export function waiverTargets(ctx, rosterId, trending = [], limit = 12, { needByPosition = null, displayLimit = null } = {}) {
   const { imported, leaguePts, playersById } = ctx;
   const need$ = needByPosition || positionalStrength(ctx).teams.find((t) => t.rosterId === Number(rosterId))?.strength || {};
   const rostered = new Set();
@@ -475,10 +475,26 @@ export function waiverTargets(ctx, rosterId, trending = [], limit = 12, { needBy
   }
   fa.sort((a, b) => b.score - a.score);
 
-  // The best thing actually available sets the bar: dropping someone only
-  // makes sense if the wire holds an upgrade on him.
+  // What the manager actually sees: the best by score, plus the best available
+  // at every position the league starts.
+  //
+  // Ranking purely by score let a whole position vanish — Uncanny Fam's top
+  // twelve were all TE, QB and WR, so the table held no running back at all
+  // while the worst players on the roster were running backs. Guaranteeing
+  // positional coverage fixes that and keeps the drop advice honest: every
+  // player named as an add is one the manager can see in the table.
+  const shown = fa.slice(0, displayLimit ?? limit);
+  const seenIds = new Set(shown.map((p) => p.id));
+  for (const pos of posOf(ctx)) {
+    const best = fa.filter((p) => p.position === pos).sort((a, b) => b.rawVorp - a.rawVorp)[0];
+    if (best && !seenIds.has(best.id)) {
+      shown.push({ ...best, coverageAdd: true });
+      seenIds.add(best.id);
+    }
+  }
+
   const bestAt = {};
-  for (const p of fa) {
+  for (const p of shown) {
     if (!bestAt[p.position] || p.rawVorp > bestAt[p.position].rawVorp) bestAt[p.position] = p;
   }
   const dropCandidates = mine
@@ -516,7 +532,7 @@ export function waiverTargets(ctx, rosterId, trending = [], limit = 12, { needBy
   const pctById = new Map(byValue.map((p, i) => [p.id, byValue.length === 1 ? 0.5 : i / (byValue.length - 1)]));
   for (const p of fa) p.faab = faabFor(pctById.get(p.id));
 
-  return { valuePctById: pctById, targets: fa.slice(0, limit), dropCandidates };
+  return { valuePctById: pctById, targets: shown, dropCandidates };
 }
 
 /** Current vs optimal lineup for a team and week. */

@@ -399,7 +399,11 @@ function TeamView({ team, positions }) {
               t('Need', '需求'), t('Trending', '热度'), t('Upgrade over', '可替换'),
             ]}
             rows={team.waivers.targets.map((w) => [
-              <b key="n">{w.name}</b>, w.position, w.team, fmt(w.ros), <Delta key="d" v={w.rawVorp} />, fmt(w.nextWeekPoints),
+              <span key="n">
+                <b>{w.name}</b>
+                {w.coverageAdd && <Pill tone="neutral">{t('best at position', '该位置最佳')}</Pill>}
+              </span>,
+              w.position, w.team, fmt(w.ros), <Delta key="d" v={w.rawVorp} />, fmt(w.nextWeekPoints),
               ...(faab ? [<Faab key="f" est={w.faab} />] : []),
               w.priority === 'low' ? '—' : <Pill key="p" tone="accent">{w.priority}</Pill>,
               w.trendingAdds ? w.trendingAdds.toLocaleString() : '—',
@@ -410,7 +414,7 @@ function TeamView({ team, positions }) {
           {faab && (
             <p className="mt-2 text-xs text-ink-500 dark:text-ink-400">
               {t(
-                `FAAB estimates come from the ${faab.wonSeen} winning bids in your league this season (budget $${faab.budget}), matched to where each target ranks among the free agents available now. Early-season bidding runs hot, so read them as an upper guide later in the year.`,
+                `Ranked by need, with the best available at every position you start included so nothing is hidden. FAAB estimates come from the ${faab.wonSeen} winning bids in your league this season (budget $${faab.budget}), matched to where each target ranks among the free agents available now. Early-season bidding runs hot, so read them as an upper guide later in the year.`,
                 `FAAB 估价来自本赛季联盟 ${faab.wonSeen} 次成交出价（预算 $${faab.budget}），按目标在当前自由球员中的排名匹配。赛季初出价偏高，后期请作为上限参考。`,
               )}
             </p>
