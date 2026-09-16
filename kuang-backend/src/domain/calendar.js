@@ -7,7 +7,7 @@
 // bye is in week 5. This module collects those dates, cross-references them
 // against who is actually available on waivers, and turns them into alerts.
 
-import { startersByPositionFor } from './season.js';
+import { optimizeLineup, SLOT_ELIGIBILITY } from './lineup.js';
 
 const r2 = (x) => Number((x ?? 0).toFixed(2));
 const plural = (n, w) => `${n} ${w}${n === 1 ? '' : 's'}`;
@@ -30,7 +30,6 @@ export function keyDates(team, ctx, { freeAgents = [], weeksAhead = 8 } = {}) {
   const currentWeek = imported.currentWeek;
   const playoffStart = imported.league.playoffWeekStart;
   const deadlineWeek = normalizeDeadline(imported.league.tradeDeadline, playoffStart);
-  const need = startersByPositionFor(team, ctx);
   const positions = ctx.activePositions || [];
 
   const roster = (team.players || []).map((id) => {
@@ -40,6 +39,7 @@ export function keyDates(team, ctx, { freeAgents = [], weeksAhead = 8 } = {}) {
       id: String(id),
       name: p?.name || String(id),
       position: p?.position || proj?.position || 'UNK',
+      fantasyPositions: p?.fantasyPositions?.length ? p.fantasyPositions : [p?.position || proj?.position || 'UNK'],
       team: p?.team || null,
       injuryStatus: p?.injuryStatus || null,
       byeWeeks: proj?.byeWeeks || [],
@@ -58,19 +58,44 @@ export function keyDates(team, ctx, { freeAgents = [], weeksAhead = 8 } = {}) {
     const byPosition = {};
     for (const p of out) (byPosition[p.position] ||= []).push(p.name);
 
+    // Actually try to fill the lineup that week rather than counting each
+    // position on its own. A TE on bye is only a hole if nothing else can take
+    // the slot, and in a league with two FLEX spots an RB or WR usually can.
+    // Counting positions independently reported a "1 short at TE" for a roster
+    // that had a healthy starting tight end and one spare flex body.
+    const weekPlayers = roster
+      .filter((p) => !p.onIR)
+      .map((p) => ({
+        id: p.id,
+        name: p.name,
+        position: p.position,
+        fantasyPositions: p.fantasyPositions,
+        points: p.byWeek?.[w] ?? 0,
+        onBye: p.byeWeeks.includes(w),
+        // A player's injury tag today says nothing about a week eight weeks
+        // out; this view is about byes.
+        injuryStatus: null,
+      }));
+
+    const filled = optimizeLineup({ rosterPositions: imported.league.rosterPositions, players: weekPlayers });
+
     const shortages = [];
-    for (const pos of positions) {
-      const required = need[pos] || 0;
-      if (!required) continue;
-      const healthy = roster.filter((p) => p.position === pos && !p.byeWeeks.includes(w) && !p.onIR).length;
-      if (healthy < required) {
-        // Who could actually fill the hole that week?
-        const cover = freeAgents
-          .filter((f) => f.position === pos && (f.byeWeeks || []).indexOf(w) === -1)
-          .slice(0, 3)
-          .map((f) => ({ id: f.id, name: f.name, position: f.position, team: f.team, weekPoints: r2(f.byWeek?.[w] ?? f.nextWeekPoints ?? 0), ros: f.ros }));
-        shortages.push({ position: pos, required, healthy, short: required - healthy, waiverCover: cover });
-      }
+    const bySlot = {};
+    for (const slot of filled.unfilled) bySlot[slot] = (bySlot[slot] || 0) + 1;
+    for (const [slot, short] of Object.entries(bySlot)) {
+      const eligible = SLOT_ELIGIBILITY[slot] || [slot];
+      const cover = freeAgents
+        .filter((f) => eligible.includes(f.position) && !(f.byeWeeks || []).includes(w))
+        .slice(0, 3)
+        .map((f) => ({ id: f.id, name: f.name, position: f.position, team: f.team, weekPoints: r2(f.byWeek?.[w] ?? f.nextWeekPoints ?? 0), ros: f.ros }));
+      shortages.push({
+        slot,
+        position: eligible.join('/'),
+        eligible,
+        short,
+        available: weekPlayers.filter((p) => !p.onBye && eligible.includes(p.position)).length,
+        waiverCover: cover,
+      });
     }
 
     byeOutlook.push({
@@ -147,7 +172,7 @@ export function keyDates(team, ctx, { freeAgents = [], weeksAhead = 8 } = {}) {
     alerts.push({
       level: b.risk === 'high' ? 'high' : 'medium',
       type: 'byeCrunch',
-      text: `Week ${b.week} (${plural(b.weeksAway, 'week')} away): ${b.shortages.map((s) => `${s.short} short at ${s.position}`).join(', ')} — ${b.playersOut} players on bye.`,
+      text: `Week ${b.week} (${plural(b.weeksAway, 'week')} away): ${b.shortages.map((s) => `${s.short} unfilled at ${s.slot}`).join(', ')} — ${b.playersOut} players on bye.`,
       action: b.shortages.flatMap((s) => s.waiverCover).length
         ? `Cover now: ${b.shortages.flatMap((s) => s.waiverCover.map((c) => `${c.name} (${c.position || ''}${c.team ? ` ${c.team}` : ''})`)).slice(0, 3).join(', ')}`
         : 'No obvious waiver cover — consider a trade or an early stash.',

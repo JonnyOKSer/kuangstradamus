@@ -66,6 +66,17 @@ export default function LeaguePage() {
       setTab('team')
     })
 
+  const goBack = () => {
+    setSummary(null)
+    setTeam(null)
+    setSeason(null)
+    setTab('standings')
+    setError('')
+    const url = new URL(window.location.href)
+    url.searchParams.delete('league')
+    window.history.replaceState({}, '', url)
+  }
+
   const loadSeason = () =>
     run(t('Crunching the season…', '正在推演赛季……'), async () => {
       if (!season) setSeason(await api(`/api/league/${summary.league.id}/season`))
@@ -104,9 +115,17 @@ export default function LeaguePage() {
             placeholder={t('Sleeper username or league ID', 'Sleeper 用户名或联盟 ID')}
             aria-label={t('Sleeper username or league ID', 'Sleeper 用户名或联盟 ID')}
           />
-          <Button type="submit" disabled={!!loading || !query.trim()} className="sm:w-auto">
-            <Seal char="卜" size={18} /> {t('Import', '导入')}
-          </Button>
+          {/* With a league open and nothing typed, the useful action is back to
+              the list — not a second import of what is already on screen. */}
+          {summary && !query.trim() ? (
+            <Button type="button" variant="quiet" onClick={goBack} className="sm:w-auto">
+              ← {t('Go back', '返回')}
+            </Button>
+          ) : (
+            <Button type="submit" disabled={!!loading || !query.trim()} className="sm:w-auto">
+              <Seal char="卜" size={18} /> {t('Find leagues', '查找联盟')}
+            </Button>
+          )}
         </div>
       </form>
 
