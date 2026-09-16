@@ -4,6 +4,7 @@ import { searchPlayers } from '../services/sleeper/players.js';
 import { getState } from '../services/sleeper/projections.js';
 import { cacheStats } from '../services/sleeper/client.js';
 import { sendError } from './errors.js';
+import { refreshAll, refreshStatus } from '../services/refresh.js';
 
 const router = express.Router();
 
@@ -39,7 +40,17 @@ router.get('/state', async (_req, res) => {
 });
 
 router.get('/health', (_req, res) => {
-  res.json({ ok: true, uptimeSec: Math.round(process.uptime()), cache: cacheStats() });
+  res.json({ ok: true, uptimeSec: Math.round(process.uptime()), cache: cacheStats(), refresh: refreshStatus() });
+});
+
+// Force a data refresh. Guarded by REFRESH_TOKEN when one is configured;
+// concurrent calls collapse into the run already in flight.
+router.post('/refresh', async (req, res) => {
+  const token = process.env.REFRESH_TOKEN;
+  if (token && req.get('x-refresh-token') !== token) {
+    return res.status(401).json({ error: 'Invalid refresh token' });
+  }
+  res.json(await refreshAll());
 });
 
 export default router;

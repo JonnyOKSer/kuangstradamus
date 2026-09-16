@@ -5,12 +5,24 @@
 import { importLeague } from './sleeper/league.js';
 import { loadPlayers, getTrending } from './sleeper/players.js';
 import { buildRosTable, DEFAULT_LAST_WEEK } from './sleeper/projections.js';
-import { computeReplacementLevels, playerFlags } from '../domain/valuation.js';
+import { computeReplacementLevels, playerFlags, activePositions } from '../domain/valuation.js';
 import { rosLeaguePoints, describeScoring } from '../domain/scoring.js';
+import { buildTrendTables } from './nfl/usage.js';
+import { byeWeeksByTeam } from './nfl/schedule.js';
+import { weekContext } from './nfl/context.js';
+import { findHandcuffSleepers } from '../domain/sleepers.js';
+import { keyDates } from '../domain/calendar.js';
 import * as season from '../domain/season.js';
 
 const CTX_TTL = 10 * 60 * 1000;
 const ctxCache = new Map(); // leagueId -> { expires, promise }
+
+/** Drop every cached league context (used by the scheduled refresh). */
+export function clearLeagueContexts() {
+  const n = ctxCache.size;
+  ctxCache.clear();
+  return n;
+}
 
 export async function buildLeagueContext(leagueId) {
   const hit = ctxCache.get(leagueId);
@@ -30,10 +42,16 @@ async function build(leagueId) {
     : { season: imported.league.season, fromWeek, throughWeek: DEFAULT_LAST_WEEK, weeks: [], table: new Map() };
 
   const scoring = imported.league.scoringSettings;
+
+  // Byes come from the schedule, not from gaps in the projection feed: Sleeper
+  // projects every player in every week, bye weeks included.
+  const byeByTeam = await byeWeeksByTeam(imported.league.season).catch(() => new Map());
+
   const leaguePts = new Map();
   for (const e of ros.table.values()) {
     const { total, byWeek } = rosLeaguePoints(e, scoring);
-    leaguePts.set(e.playerId, { total, byWeek, position: e.position, team: e.team, byeWeeks: e.byeWeeks, injuryStatus: e.injuryStatus, opponents: e.opponents });
+    const byeWeeks = byeByTeam.get(e.team) ?? e.byeWeeks ?? [];
+    leaguePts.set(e.playerId, { total, byWeek, position: e.position, team: e.team, byeWeeks, injuryStatus: e.injuryStatus, opponents: e.opponents });
   }
   const levels = computeReplacementLevels({
     rosterPositions: imported.league.rosterPositions,
@@ -43,8 +61,35 @@ async function build(leagueId) {
   const rounds = Math.max(1, Math.ceil(Math.log2(imported.league.playoffTeams || 6)));
   const playoffWeeks = Array.from({ length: rounds }, (_, i) => imported.league.playoffWeekStart + i);
 
-  return { imported, playersById: byId, ros, leaguePts, levels, scoring, playoffWeeks, isCurrent, scoringDescription: describeScoring(scoring) };
+  // Recent form, usage and defence-vs-position, scored in this league's rules.
+  // Absent before any week has been played, in which case the gates that need
+  // it report themselves as unknown rather than guessing.
+  const trends = isCurrent && imported.lastScoredWeek >= 1
+    ? await buildTrendTables({
+      season: imported.league.season,
+      throughWeek: imported.lastScoredWeek,
+      scoringSettings: scoring,
+    }).catch(() => null)
+    : null;
+
+  return {
+    imported,
+    playersById: byId,
+    ros,
+    leaguePts,
+    levels,
+    scoring,
+    playoffWeeks,
+    isCurrent,
+    trends,
+    activePositions: activePositions(imported.league.rosterPositions),
+    byeByTeam,
+    scoringDescription: describeScoring(scoring),
+    builtAt: Date.now(),
+  };
 }
+
+const pick = (obj, keys) => Object.fromEntries(keys.filter((k) => k in obj).map((k) => [k, obj[k]]));
 
 function leagueHeader(ctx) {
   const { imported } = ctx;
@@ -56,9 +101,16 @@ function leagueHeader(ctx) {
     lastScoredWeek: imported.lastScoredWeek,
     isCurrentSeason: ctx.isCurrent,
     projectionWindow: ctx.isCurrent ? { fromWeek: ctx.ros.fromWeek, throughWeek: ctx.ros.throughWeek } : null,
-    replacementLevels: ctx.levels.replacementPoints,
-    startersByPosition: ctx.levels.startersByPosition,
+    replacementLevels: pick(ctx.levels.replacementPoints, ctx.activePositions),
+    startersByPosition: pick(ctx.levels.startersByPosition, ctx.activePositions),
     playoffWeeks: ctx.playoffWeeks,
+    activePositions: ctx.activePositions,
+    usesKicker: ctx.activePositions.includes('K'),
+    usesDefense: ctx.activePositions.includes('DEF'),
+    dataFreshness: {
+      leagueBuiltAt: new Date(ctx.builtAt).toISOString(),
+      trendWeeks: ctx.trends?.weeks ?? [],
+    },
   };
 }
 
@@ -100,6 +152,7 @@ export async function teamReport(leagueId, rosterId, { week } = {}) {
     throw err;
   }
   const targetWeek = Number(week) || ctx.imported.currentWeek;
+  const weekCtx = ctx.isCurrent ? await weekContext(ctx.imported.league.season, targetWeek).catch(() => null) : null;
   const roster = (team.players || []).map((id) => {
     const v = season.valuedPlayer(id, ctx);
     const proj = ctx.leaguePts.get(String(id));
@@ -111,10 +164,42 @@ export async function teamReport(leagueId, rosterId, { week } = {}) {
       weeksLeft: proj ? Object.keys(proj.byWeek).length : 0,
       flags: playerFlags({ injuryStatus: v.injuryStatus, byeWeeks: v.byeWeeks, playoffWeeks: ctx.playoffWeeks, projected: v.projected }),
     };
-  }).sort((a, b) => b.vorp - a.vorp);
+  })
+    // A league with no K or DEF slot has no kickers or defences to report on.
+    .filter((p) => ctx.activePositions.includes(p.position))
+    .sort((a, b) => b.vorp - a.vorp);
 
   const trending = ctx.isCurrent ? await getTrending('add', { lookbackHours: 48, limit: 50 }).catch(() => []) : [];
   const strength = season.positionalStrength(ctx);
+
+  // Deep waiver: workhorse starters league-wide, then the free agents directly
+  // behind them on their NFL depth chart.
+  const rostered = new Set();
+  for (const t of ctx.imported.teams) {
+    for (const id of [...(t.players || []), ...(t.reserve || []), ...(t.taxi || [])]) rostered.add(String(id));
+  }
+  const myStrength = strength.teams.find((t) => t.rosterId === team.rosterId)?.strength ?? {};
+  const sleepers = ctx.isCurrent && ctx.trends
+    ? findHandcuffSleepers({
+      players: ctx.playersById,
+      form: ctx.trends.form,
+      leaguePts: ctx.leaguePts,
+      rostered,
+      activePositions: ctx.activePositions,
+      needByPosition: myStrength,
+      currentWeek: targetWeek,
+    })
+    : [];
+
+  // A wide pool so the calendar can answer "who can cover that bye?" at any
+  // position, even though only the top of it is shown as waiver targets.
+  const waiverPool = ctx.isCurrent
+    ? season.waiverTargets(ctx, team.rosterId, trending, 80, { needByPosition: myStrength })
+    : { targets: [], dropCandidates: [] };
+  const waivers = { ...waiverPool, targets: waiverPool.targets.slice(0, 12) };
+
+  const dates = ctx.isCurrent ? keyDates(team, ctx, { freeAgents: waiverPool.targets }) : null;
+  const deadlinePassed = !!dates?.tradeDeadline?.passed;
 
   return {
     league: leagueHeader(ctx),
@@ -123,9 +208,22 @@ export async function teamReport(leagueId, rosterId, { week } = {}) {
     totalStarterValue: strength.teams.find((t) => t.rosterId === team.rosterId)?.totalStarterValue ?? 0,
     positionalStrength: strength.teams.find((t) => t.rosterId === team.rosterId)?.strength ?? null,
     leagueAverage: strength.leagueAverage,
-    lineup: ctx.isCurrent ? season.lineupReport(team, targetWeek, ctx) : null,
-    tradeTargets: ctx.isCurrent ? season.tradeTargets(ctx, team.rosterId) : [],
-    waivers: ctx.isCurrent ? season.waiverTargets(ctx, team.rosterId, trending) : { targets: [], dropCandidates: [] },
+    lineup: ctx.isCurrent ? season.gatedLineupReport(team, targetWeek, ctx, weekCtx) : null,
+    tradeTargets: ctx.isCurrent && !deadlinePassed ? season.tradeTargets(ctx, team.rosterId) : [],
+    tradeWindow: dates
+      ? {
+        deadlineWeek: dates.tradeDeadline.week,
+        weeksAway: dates.tradeDeadline.weeksAway,
+        passed: deadlinePassed,
+        note: deadlinePassed
+          ? `The trade deadline passed in week ${dates.tradeDeadline.week}. Waivers and free agency only from here.`
+          : dates.tradeDeadline.week
+            ? `Trades close after week ${dates.tradeDeadline.week}${dates.tradeDeadline.weeksAway <= 2 ? ' — act now' : ''}.`
+            : 'This league has no trade deadline set.',
+      }
+      : null,
+    keyDates: dates,
+    waivers: ctx.isCurrent ? { ...waivers, sleepers } : { targets: [], dropCandidates: [], sleepers: [] },
     autoSet: {
       supported: false,
       reason: 'Sleeper has no official write API. Lineups here are suggestions; apply them in the Sleeper app. Yahoo auto-set is planned once API access is approved.',
@@ -142,5 +240,7 @@ export async function lineupForTeam(leagueId, rosterId, week) {
     throw err;
   }
   if (!ctx.isCurrent) return { week, unavailable: 'Projections are only available for the current season.' };
-  return season.lineupReport(team, Number(week) || ctx.imported.currentWeek, ctx);
+  const targetWeek = Number(week) || ctx.imported.currentWeek;
+  const weekCtx = await weekContext(ctx.imported.league.season, targetWeek).catch(() => null);
+  return season.gatedLineupReport(team, targetWeek, ctx, weekCtx);
 }

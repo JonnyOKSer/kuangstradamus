@@ -26,6 +26,21 @@ export function starterSlots(rosterPositions) {
   return rosterPositions.filter((s) => !NON_STARTING_SLOTS.has(s));
 }
 
+/**
+ * The positions a league actually starts. A league with no K or DEF slot has
+ * no kickers or defences to analyse, so every report filters through this
+ * instead of assuming the traditional nine-slot lineup.
+ */
+export function activePositions(rosterPositions = DEFAULT_ROSTER_POSITIONS) {
+  const slots = starterSlots(rosterPositions);
+  const active = new Set();
+  for (const slot of slots) {
+    if (CORE_POSITIONS.includes(slot)) active.add(slot);
+    for (const pos of FLEX_ELIGIBILITY[slot] || []) active.add(pos);
+  }
+  return CORE_POSITIONS.filter((p) => active.has(p));
+}
+
 function benchBuffer(pos, numTeams, hasSuperFlex) {
   switch (pos) {
     case 'QB': return hasSuperFlex ? Math.round(numTeams * 0.5) : (numTeams >= 12 ? 2 : 1);

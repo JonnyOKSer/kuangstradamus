@@ -80,6 +80,7 @@ export default function LeaguePage() {
     })
 
   const L = summary?.league
+  const POS = L?.activePositions?.length ? L.activePositions : ['QB', 'RB', 'WR', 'TE', 'K', 'DEF']
 
   return (
     <div className="min-h-screen p-4 bg-white dark:bg-black text-black dark:text-white transition-colors duration-300">
@@ -163,13 +164,16 @@ export default function LeaguePage() {
             {tab === 'strength' && (
               <Card title="Positional strength (starter value vs league average)">
                 <Table
-                  head={['Team', 'QB', 'RB', 'WR', 'TE', 'K', 'DEF', 'Total']}
+                  head={['Team', ...POS, 'Total']}
                   rows={summary.positionalStrength.teams.map((t) => [
                     <b key="n">{t.teamName}</b>,
-                    ...['QB', 'RB', 'WR', 'TE', 'K', 'DEF'].map((p) => <Delta key={p} v={t.strength[p].vsAverage} />),
+                    ...POS.map((p) => <Delta key={p} v={t.strength[p]?.vsAverage} />),
                     fmt(t.totalStarterValue, 0),
                   ])}
                 />
+                {!L.usesKicker && !L.usesDefense && (
+                  <p className="text-xs opacity-60 mt-2">This league starts no kicker or defence, so neither is scored or recommended anywhere in the analyzer.</p>
+                )}
               </Card>
             )}
 
@@ -206,7 +210,7 @@ export default function LeaguePage() {
               </>
             )}
 
-            {tab === 'team' && team && <TeamView team={team} />}
+            {tab === 'team' && team && <TeamView team={team} positions={POS} />}
           </>
         )}
       </div>
@@ -214,42 +218,24 @@ export default function LeaguePage() {
   )
 }
 
-function TeamView({ team }) {
+function TeamView({ team, positions }) {
   const lineup = team.lineup
+  const dates = team.keyDates
+  const sleepers = team.waivers?.sleepers || []
+
   return (
     <>
       <Card title={`${team.team.teamName} · ${team.team.record.wins}-${team.team.record.losses} · starter value ${fmt(team.totalStarterValue, 0)}`}>
         <div className="flex flex-wrap gap-3 text-sm">
-          {team.positionalStrength && ['QB', 'RB', 'WR', 'TE', 'K', 'DEF'].map((p) => (
-            <span key={p} className="border rounded px-2 py-1">{p}: <Delta v={team.positionalStrength[p].vsAverage} /></span>
+          {team.positionalStrength && positions.map((p) => (
+            <span key={p} className="border rounded px-2 py-1">{p}: <Delta v={team.positionalStrength[p]?.vsAverage} /></span>
           ))}
         </div>
       </Card>
 
-      {lineup && (
-        <Card title={`Lineup check · week ${lineup.week}`}>
-          {lineup.moves.length === 0 ? (
-            <p className="text-green-700 dark:text-green-400">✅ {lineup.note || 'Your current starters already match the optimal lineup.'} ({fmt(lineup.currentTotal)} projected{lineup.gain > 0 ? `, optimal ${fmt(lineup.optimalTotal)}` : ''})</p>
-          ) : (
-            <>
-              <p className="mb-2">Projected gain <b>+{fmt(lineup.gain)}</b> ({fmt(lineup.currentTotal)} → {fmt(lineup.optimalTotal)})</p>
-              <ul className="list-disc ml-5 space-y-1 text-sm">
-                {lineup.moves.map((m, i) => (
-                  <li key={i}>
-                    {m.action === 'start' ? `▶ Start ${m.name} at ${m.slot} (${fmt(m.points)})` : `⏸ Bench ${m.name} (${fmt(m.points)}) — ${m.reason}`}
-                  </li>
-                ))}
-              </ul>
-            </>
-          )}
-          {lineup.unfilled?.length > 0 && <p className="text-sm text-red-600 mt-2">No eligible player for: {lineup.unfilled.join(', ')}</p>}
-          <p className="text-xs opacity-60 mt-2">{team.autoSet.reason}</p>
-          <details className="mt-2 text-sm">
-            <summary className="cursor-pointer">Optimal lineup</summary>
-            <Table head={['Slot', 'Player', 'Pos', 'Team', 'Proj']} rows={lineup.optimal.map((s) => [s.slot, s.player?.name || '—', s.player?.position || '', s.player?.team || '', fmt(s.points)])} />
-          </details>
-        </Card>
-      )}
+      {dates && <KeyDates dates={dates} tradeWindow={team.tradeWindow} />}
+
+      {lineup && <LineupCard lineup={lineup} autoSet={team.autoSet} />}
 
       <Card title="Roster (rest of season)">
         <Table
@@ -262,12 +248,22 @@ function TeamView({ team }) {
         />
       </Card>
 
+      {team.tradeWindow?.passed && (
+        <Card title="Trades">
+          <p className="text-sm">🔒 {team.tradeWindow.note}</p>
+        </Card>
+      )}
+
       {team.tradeTargets?.length > 0 && (
-        <Card title="Trade targets (fills your weakest positions from teams with surplus)">
+        <Card title="Trade targets (ranked by positional need × rest-of-season value)">
+          {team.tradeWindow && !team.tradeWindow.passed && (
+            <p className="text-xs opacity-70 mb-2">{team.tradeWindow.note}</p>
+          )}
           <ul className="space-y-2 text-sm">
             {team.tradeTargets.map((t, i) => (
               <li key={i} className="border rounded p-2">
-                <b>{t.target.name}</b> ({t.position}, {t.target.team}) from <b>{t.partner.teamName}</b> · value {fmt(t.target.vorp)} → +{fmt(t.gain)} over {t.upgradeOver?.name || 'your current starter'}
+                <b>{t.target.name}</b> ({t.position}, {t.target.team}) from <b>{t.partner.teamName}</b> · {fmt(t.target.ros)} ROS pts · value {fmt(t.target.vorp)} → +{fmt(t.gain)} over {t.upgradeOver?.name || 'your current starter'}
+                {t.positionNeed < 0 && <span className="ml-1 text-xs bg-amber-100 dark:bg-amber-900 rounded px-1">fills a {fmt(Math.abs(t.positionNeed), 0)}-pt hole at {t.position}</span>}
                 {t.offerIdeas?.length > 0 && <div className="text-xs opacity-70 mt-1">Offer ideas from your surplus: {t.offerIdeas.map((o) => `${o.name} (${fmt(o.vorp)})`).join(', ')}</div>}
               </li>
             ))}
@@ -275,11 +271,18 @@ function TeamView({ team }) {
         </Card>
       )}
 
+      {sleepers.length > 0 && <SleeperCard sleepers={sleepers} />}
+
       {team.waivers?.targets?.length > 0 && (
-        <Card title="Waiver targets (free agents by value, boosted by trending adds)">
+        <Card title="Waiver targets (ranked by positional need, then rest-of-season value)">
           <Table
-            head={['Player', 'Pos', 'Team', 'ROS pts', 'vs repl.', 'Next wk', 'Trending adds', 'Upgrade over']}
-            rows={team.waivers.targets.map((w) => [<b key="n">{w.name}</b>, w.position, w.team, fmt(w.ros), <Delta key="d" v={w.rawVorp} />, fmt(w.nextWeekPoints), w.trendingAdds ? w.trendingAdds.toLocaleString() : '—', w.upgradeOver ? `${w.upgradeOver.name} (+${fmt(w.upgradeOver.gain)})` : '—'])}
+            head={['Player', 'Pos', 'Team', 'ROS pts', 'vs repl.', 'Next wk', 'Need', 'Trending adds', 'Upgrade over']}
+            rows={team.waivers.targets.map((w) => [
+              <b key="n">{w.name}</b>, w.position, w.team, fmt(w.ros), <Delta key="d" v={w.rawVorp} />, fmt(w.nextWeekPoints),
+              <Priority key="p" level={w.priority} />,
+              w.trendingAdds ? w.trendingAdds.toLocaleString() : '—',
+              w.upgradeOver ? `${w.upgradeOver.name} (+${fmt(w.upgradeOver.gain)})` : '—',
+            ])}
           />
           {team.waivers.dropCandidates?.length > 0 && (
             <p className="text-xs opacity-70 mt-2">Drop candidates: {team.waivers.dropCandidates.map((d) => `${d.name} (${d.position}, ${fmt(d.vorp)})`).join(' · ')}</p>
@@ -288,6 +291,201 @@ function TeamView({ team }) {
       )}
     </>
   )
+}
+
+const LEVEL_STYLES = {
+  high: 'bg-red-100 dark:bg-red-900 border-red-300 dark:border-red-700',
+  medium: 'bg-amber-100 dark:bg-amber-900 border-amber-300 dark:border-amber-700',
+  info: 'bg-gray-100 dark:bg-gray-800 border-gray-300 dark:border-gray-700',
+}
+
+function KeyDates({ dates, tradeWindow }) {
+  const d = dates
+  return (
+    <Card title="Key dates & alerts">
+      <div className="grid sm:grid-cols-3 gap-2 text-sm mb-3">
+        <Stat label="Trade deadline" value={d.tradeDeadline.week ? `Week ${d.tradeDeadline.week}` : 'None set'} sub={d.tradeDeadline.week ? (d.tradeDeadline.passed ? 'passed' : `${d.tradeDeadline.weeksAway} weeks away`) : tradeWindow?.note} />
+        <Stat label="Playoffs" value={`Week ${d.playoffs.startWeek}`} sub={`${d.playoffs.teams} teams · weeks ${d.playoffs.weeks.join(', ')}`} />
+        <Stat label="FAAB" value={d.waivers.budget ? `$${d.waivers.remaining} left` : `Waiver #${d.waivers.position ?? '—'}`} sub={d.waivers.budget ? `of $${d.waivers.budget}` : 'rolling waiver priority'} />
+      </div>
+
+      {d.alerts?.length > 0 && (
+        <ul className="space-y-2 mb-3">
+          {d.alerts.map((a, i) => (
+            <li key={i} className={`border rounded p-2 text-sm ${LEVEL_STYLES[a.level] || LEVEL_STYLES.info}`}>
+              <div className="font-semibold">{a.level === 'high' ? '🚨' : a.level === 'medium' ? '⚠️' : 'ℹ️'} {a.text}</div>
+              {a.action && <div className="text-xs opacity-80 mt-0.5">{a.action}</div>}
+            </li>
+          ))}
+        </ul>
+      )}
+
+      {d.byeOutlook?.length > 0 && (
+        <details className="text-sm" open={d.byeOutlook.some((b) => b.risk !== 'low')}>
+          <summary className="cursor-pointer font-semibold">Bye weeks ahead</summary>
+          <ul className="mt-2 space-y-2">
+            {d.byeOutlook.map((b) => (
+              <li key={b.week} className="border rounded p-2">
+                <div>
+                  <b>Week {b.week}</b> <span className="opacity-60 text-xs">({b.weeksAway} away)</span> — {b.playersOut} on bye:{' '}
+                  {Object.entries(b.byPosition).map(([pos, names]) => `${pos}: ${names.join(', ')}`).join(' · ')}
+                </div>
+                {b.shortages.map((sh) => (
+                  <div key={sh.position} className="text-xs mt-1">
+                    ⚠️ {sh.short} short at {sh.position} (need {sh.required}, {sh.healthy} available).{' '}
+                    {sh.waiverCover.length
+                      ? <>Available now: {sh.waiverCover.map((c) => `${c.name} (${c.team}, ${fmt(c.weekPoints)} that week)`).join(', ')}</>
+                      : 'No free agent covers it — trade or stash early.'}
+                  </div>
+                ))}
+              </li>
+            ))}
+          </ul>
+        </details>
+      )}
+
+      {d.milestones?.length > 0 && (
+        <details className="text-sm mt-2">
+          <summary className="cursor-pointer font-semibold">All milestones</summary>
+          <ul className="mt-2 space-y-1 text-xs">
+            {d.milestones.map((m, i) => (
+              <li key={i}>
+                <b>Week {m.week}</b> — {m.label}
+                {m.passed && <span className="opacity-60"> (passed)</span>}
+                {m.urgency === 'high' && !m.passed && <span className="ml-1 text-red-600 dark:text-red-400">urgent</span>}
+              </li>
+            ))}
+          </ul>
+        </details>
+      )}
+    </Card>
+  )
+}
+
+function LineupCard({ lineup, autoSet }) {
+  return (
+    <Card title={`Start/sit · week ${lineup.week}`}>
+      <p className="text-xs opacity-70 mb-2">
+        Every projection is re-scored through {lineup.gatesApplied?.length || 6} gates — availability, role, form, matchup, weather and game script — before any change is suggested.
+      </p>
+
+      {lineup.moves.length === 0 ? (
+        <p className="text-green-700 dark:text-green-400">✅ {lineup.note} ({fmt(lineup.currentTotal)} projected after gates)</p>
+      ) : (
+        <>
+          <p className="mb-2">Projected gain <b>+{fmt(lineup.gain)}</b> ({fmt(lineup.currentTotal)} → {fmt(lineup.recommendedTotal)} after gates)</p>
+          <ul className="space-y-2 text-sm">
+            {lineup.moves.map((m, i) => (
+              <li key={i} className="border rounded p-2">
+                <div>
+                  <b>{m.slot}</b>: ▶ start <b>{m.in.name}</b> ({m.in.position} {m.in.team}{m.in.opponent ? ` vs ${m.in.opponent}` : ''})
+                  {m.out && <> · ⏸ bench <b>{m.out.name}</b></>}
+                  <span className="ml-1 text-green-700 dark:text-green-400">+{fmt(m.gain)}</span>
+                </div>
+                <div className="text-xs opacity-75 mt-1">
+                  {fmt(m.in.baseProjection)} raw → {fmt(m.in.projection)} after gates · confidence {Math.round((m.in.confidence ?? 0) * 100)}%
+                  {m.bar != null && <> · cleared a {fmt(m.bar)}-pt bar</>}
+                </div>
+                {m.out?.reason && <div className="text-xs opacity-75">Benching {m.out.name}: {m.out.reason}</div>}
+                {m.in.why?.length > 0 && <div className="text-xs opacity-75">Why: {m.in.why.join(' · ')}</div>}
+                {m.in.weather && <div className="text-xs opacity-75">🌦 {m.in.weather}</div>}
+              </li>
+            ))}
+          </ul>
+        </>
+      )}
+
+      {lineup.held?.length > 0 && (
+        <details className="mt-3 text-sm">
+          <summary className="cursor-pointer">Considered but held ({lineup.held.length})</summary>
+          <ul className="mt-2 space-y-1 text-xs">
+            {lineup.held.map((h, i) => (
+              <li key={i}>{h.slot}: kept <b>{h.keep}</b> over {h.over} — {h.reason}</li>
+            ))}
+          </ul>
+        </details>
+      )}
+
+      {lineup.contextNotes?.length > 0 && (
+        <div className="mt-2 text-xs opacity-80">
+          {lineup.contextNotes.map((n, i) => <div key={i}>🌦 {n}</div>)}
+        </div>
+      )}
+
+      {lineup.unfilled?.length > 0 && <p className="text-sm text-red-600 mt-2">No eligible player for: {lineup.unfilled.join(', ')}</p>}
+      <p className="text-xs opacity-60 mt-2">{autoSet?.reason}</p>
+
+      <details className="mt-2 text-sm">
+        <summary className="cursor-pointer">Recommended lineup with gate detail</summary>
+        <div className="mt-2 space-y-2">
+          {lineup.recommended.map((s, i) => (
+            <div key={i} className="border rounded p-2">
+              <div className="flex justify-between">
+                <span><b>{s.slot}</b> — {s.name} {s.position ? `(${s.position} ${s.team || ''}${s.opponent ? ` vs ${s.opponent}` : ''})` : ''}</span>
+                <span>{fmt(s.baseProjection)} → <b>{fmt(s.points)}</b></span>
+              </div>
+              {s.gates && (
+                <table className="w-full text-xs mt-1">
+                  <tbody>
+                    {s.gates.map((g) => (
+                      <tr key={g.name} className={g.verdict === 'fail' ? 'text-red-600 dark:text-red-400' : g.verdict === 'pass' ? 'text-green-700 dark:text-green-400' : 'opacity-70'}>
+                        <td className="pr-2 align-top">{g.name}</td>
+                        <td className="pr-2 align-top">×{g.factor}</td>
+                        <td className="align-top">{g.note}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              )}
+            </div>
+          ))}
+        </div>
+      </details>
+    </Card>
+  )
+}
+
+function SleeperCard({ sleepers }) {
+  return (
+    <Card title="Deep sleepers (handcuffs behind the league's workhorses)">
+      <p className="text-xs opacity-70 mb-2">
+        Free agents sitting directly behind a high-volume starter on their NFL depth chart, valued on what they would inherit — plus anyone whose own snap share is already climbing.
+      </p>
+      <ul className="space-y-2 text-sm">
+        {sleepers.map((s) => (
+          <li key={s.id} className="border rounded p-2">
+            <div>
+              <b>{s.name}</b> ({s.position} {s.team})
+              {s.rising && <span className="ml-1 text-xs bg-green-100 dark:bg-green-900 rounded px-1">rising</span>}
+              {s.type === 'handcuff' && !s.rising && <span className="ml-1 text-xs bg-blue-100 dark:bg-blue-900 rounded px-1">handcuff</span>}
+              <span className="ml-2 opacity-70 text-xs">score {fmt(s.score)}</span>
+            </div>
+            <div className="text-xs opacity-80 mt-0.5">{s.why}</div>
+            <div className="text-xs opacity-70 mt-0.5">
+              Would inherit ~{fmt(s.contingentPointsPerGame)} pts/gm · own ROS {fmt(s.rosPoints)}
+              {s.sampleGames ? ` · ${s.sampleGames}-game sample` : ''}
+            </div>
+          </li>
+        ))}
+      </ul>
+    </Card>
+  )
+}
+
+function Stat({ label, value, sub }) {
+  return (
+    <div className="border rounded p-2">
+      <div className="text-xs opacity-60">{label}</div>
+      <div className="font-semibold">{value}</div>
+      {sub && <div className="text-xs opacity-70">{sub}</div>}
+    </div>
+  )
+}
+
+function Priority({ level }) {
+  if (!level || level === 'low') return <span className="opacity-50">—</span>
+  const cls = level === 'high' ? 'bg-red-100 dark:bg-red-900' : 'bg-amber-100 dark:bg-amber-900'
+  return <span className={`text-xs rounded px-1 ${cls}`}>{level}</span>
 }
 
 function Card({ title, children }) {

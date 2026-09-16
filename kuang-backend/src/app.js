@@ -5,8 +5,7 @@ import cors from 'cors';
 import tradeRoutes from './routes/trade.js';
 import chatRoutes from './routes/chat.js';
 import leagueRoutes from './routes/league.js';
-import { loadPlayers } from './services/sleeper/players.js';
-import { getState, buildRosTable, DEFAULT_LAST_WEEK } from './services/sleeper/projections.js';
+import { startRefreshLoop } from './services/refresh.js';
 
 const app = express();
 const PORT = process.env.PORT || 3000;
@@ -58,9 +57,10 @@ app.get('/api', (_req, res) => {
       'GET /api/league/:leagueId/season': 'lineup efficiency, all-play luck, strength of schedule, playoff odds',
       'GET /api/league/:leagueId/team/:rosterId?week=': 'valued roster, lineup suggestion, trade + waiver targets',
       'GET /api/league/:leagueId/team/:rosterId/lineup?week=': 'optimal lineup vs current',
-      'GET /api/health': 'liveness + cache stats',
+      'GET /api/health': 'liveness + cache stats + last data refresh',
+      'POST /api/refresh': 'force a data refresh (x-refresh-token when REFRESH_TOKEN is set)',
     },
-    data: 'Sleeper public API (free). No paid data providers.',
+    data: 'Sleeper public API + Open-Meteo forecasts (both free). No paid data providers.',
   });
 });
 
@@ -76,16 +76,8 @@ app.use((err, _req, res, _next) => {
 if (process.env.NODE_ENV !== 'test') {
   app.listen(PORT, () => {
     console.log(`🚀 Kuangstradamus API live on port ${PORT}`);
-    // Warm the caches so the first trade request is fast.
-    Promise.all([loadPlayers(), getState()])
-      .then(async ([{ list }, state]) => {
-        console.log(`🔥 Warm: ${list.length} players, ${state.season} week ${state.week}`);
-        if (state.season_type === 'regular' && state.week <= DEFAULT_LAST_WEEK) {
-          const ros = await buildRosTable({ season: state.season, fromWeek: state.week });
-          console.log(`🔥 Warm: rest-of-season projections for ${ros.table.size} players (weeks ${ros.fromWeek}-${ros.throughWeek})`);
-        }
-      })
-      .catch((err) => console.warn('⚠️ Warmup failed (will retry on demand):', err.message));
+    // Warms every cache now and keeps them fresh on a 6-hour clock.
+    startRefreshLoop();
   });
 }
 

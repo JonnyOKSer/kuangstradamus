@@ -5,8 +5,12 @@
 
 import { optimizeLineup, diffLineups } from './lineup.js';
 import { playerValue, CORE_POSITIONS, FLEX_ELIGIBILITY, starterSlots } from './valuation.js';
+import { runGates, challengeStarter } from './gates.js';
+import { defenseVs } from '../services/nfl/usage.js';
 
 const r2 = (x) => Number((x ?? 0).toFixed(2));
+/** Positions this league starts — everything else is hidden, not zeroed. */
+const posOf = (ctx) => ctx.activePositions || CORE_POSITIONS;
 const MIN_LINEUP_GAIN = 1; // ignore lineup swaps worth less than a point
 const r1 = (x) => Number((x ?? 0).toFixed(1));
 
@@ -291,9 +295,9 @@ export function playoffOdds(ctx, { sims = 2000 } = {}) {
 // ---------- roster construction & targets ----------
 
 /** How many starters each position gets on one team (flex allotted greedily to the roster). */
-function startersByPositionFor(team, ctx) {
+export function startersByPositionFor(team, ctx) {
   const slots = starterSlots(ctx.imported.league.rosterPositions);
-  const counts = Object.fromEntries(CORE_POSITIONS.map((p) => [p, 0]));
+  const counts = Object.fromEntries(posOf(ctx).map((p) => [p, 0]));
   for (const s of slots) if (counts[s] !== undefined) counts[s]++;
   const flexSlots = slots.filter((s) => FLEX_ELIGIBILITY[s]);
   if (flexSlots.length) {
@@ -317,6 +321,7 @@ function startersByPositionFor(team, ctx) {
 
 export function positionalStrength(ctx) {
   const { imported } = ctx;
+  const POSITIONS = posOf(ctx);
   const rows = imported.teams.map((t) => {
     const need = startersByPositionFor(t, ctx);
     const byPos = {};
@@ -325,7 +330,7 @@ export function positionalStrength(ctx) {
       (byPos[v.position] ||= []).push(v);
     }
     const strength = {};
-    for (const pos of CORE_POSITIONS) {
+    for (const pos of POSITIONS) {
       const list = (byPos[pos] || []).sort((a, b) => b.vorp - a.vorp);
       const starters = list.slice(0, need[pos]);
       const bench = list.slice(need[pos]);
@@ -341,8 +346,8 @@ export function positionalStrength(ctx) {
     return { rosterId: t.rosterId, teamName: t.teamName, strength, totalStarterValue: total };
   });
   const avg = {};
-  for (const pos of CORE_POSITIONS) avg[pos] = r2(rows.reduce((s, r) => s + r.strength[pos].starters, 0) / (rows.length || 1));
-  for (const r of rows) for (const pos of CORE_POSITIONS) r.strength[pos].vsAverage = r2(r.strength[pos].starters - avg[pos]);
+  for (const pos of POSITIONS) avg[pos] = r2(rows.reduce((s, r) => s + r.strength[pos].starters, 0) / (rows.length || 1));
+  for (const r of rows) for (const pos of POSITIONS) r.strength[pos].vsAverage = r2(r.strength[pos].starters - avg[pos]);
   return { teams: rows.sort((a, b) => b.totalStarterValue - a.totalStarterValue), leagueAverage: avg };
 }
 
@@ -351,8 +356,9 @@ export function tradeTargets(ctx, rosterId, limit = 6) {
   const me = teams.find((t) => t.rosterId === Number(rosterId));
   if (!me) return [];
   const myTeam = ctx.imported.teams.find((t) => t.rosterId === Number(rosterId));
-  const deficits = CORE_POSITIONS.filter((p) => !['K', 'DEF'].includes(p)).map((p) => ({ pos: p, delta: me.strength[p].vsAverage })).sort((a, b) => a.delta - b.delta).filter((d) => d.delta < 0).slice(0, 2);
-  const surpluses = CORE_POSITIONS.filter((p) => !['K', 'DEF'].includes(p)).map((p) => ({ pos: p, delta: me.strength[p].vsAverage })).filter((d) => d.delta > 0).sort((a, b) => b.delta - a.delta);
+  const tradeable = posOf(ctx).filter((p) => !['K', 'DEF'].includes(p));
+  const deficits = tradeable.map((p) => ({ pos: p, delta: me.strength[p].vsAverage })).sort((a, b) => a.delta - b.delta).filter((d) => d.delta < 0).slice(0, 2);
+  const surpluses = tradeable.map((p) => ({ pos: p, delta: me.strength[p].vsAverage })).filter((d) => d.delta > 0).sort((a, b) => b.delta - a.delta);
   const myPlayers = (myTeam.players || []).map((id) => valuedPlayer(id, ctx));
 
   const targets = [];
@@ -373,22 +379,32 @@ export function tradeTargets(ctx, rosterId, limit = 6) {
           .sort((a, b) => Math.abs(a.vorp - c.vorp) - Math.abs(b.vorp - c.vorp))
           .slice(0, 3)
           .map((p) => ({ id: p.id, name: p.name, position: p.position, vorp: p.vorp }));
+        const gain = r2(c.rawVorp - weakest);
+        const needBoost = Math.min(1, Math.max(0, -d.delta) / 25);
         targets.push({
           position: d.pos,
           partner: { rosterId: other.rosterId, teamName: other.teamName, surplusAtPosition: other.strength[d.pos].vsAverage },
           target: { id: c.id, name: c.name, team: c.team, ros: c.ros, vorp: c.vorp, injuryStatus: c.injuryStatus },
           upgradeOver: me.strength[d.pos].weakestStarter,
-          gain: r2(c.rawVorp - weakest),
+          gain,
+          positionNeed: r2(d.delta),
+          priority: r2(gain * (1 + 0.6 * needBoost) + 0.05 * c.ros),
           offerIdeas,
         });
       }
     }
   }
-  return targets.sort((a, b) => b.gain - a.gain).slice(0, limit);
+  return targets.sort((a, b) => b.priority - a.priority || b.gain - a.gain).slice(0, limit);
 }
 
-export function waiverTargets(ctx, rosterId, trending = [], limit = 12) {
+/**
+ * Free-agent ranking driven by three things in order: how far below replacement
+ * the team's current starter at that position is (need), rest-of-season points,
+ * and only then the crowd's trending adds.
+ */
+export function waiverTargets(ctx, rosterId, trending = [], limit = 12, { needByPosition = null } = {}) {
   const { imported, leaguePts, playersById } = ctx;
+  const need$ = needByPosition || positionalStrength(ctx).teams.find((t) => t.rosterId === Number(rosterId))?.strength || {};
   const rostered = new Set();
   for (const t of imported.teams) for (const id of [...(t.players || []), ...(t.reserve || []), ...(t.taxi || [])]) rostered.add(String(id));
   const trendMap = new Map((trending || []).map((t) => [String(t.player_id), t.count]));
@@ -398,30 +414,47 @@ export function waiverTargets(ctx, rosterId, trending = [], limit = 12) {
   const weakestStarterAt = {};
   const byPos = {};
   for (const p of mine) (byPos[p.position] ||= []).push(p);
-  for (const pos of CORE_POSITIONS) {
+  for (const pos of posOf(ctx)) {
     const list = (byPos[pos] || []).sort((a, b) => b.vorp - a.vorp);
     weakestStarterAt[pos] = list[Math.min(list.length, need[pos] || 0) - 1] || null;
   }
-  const dropCandidates = mine.filter((p) => !['K', 'DEF'].includes(p.position) || mine.filter((x) => x.position === p.position).length > 1).sort((a, b) => a.vorp - b.vorp).slice(0, 3);
+  const dropCandidates = mine
+    .filter((p) => posOf(ctx).includes(p.position))
+    .filter((p) => !['K', 'DEF'].includes(p.position) || mine.filter((x) => x.position === p.position).length > 1)
+    .sort((a, b) => a.vorp - b.vorp)
+    .slice(0, 3);
 
   const fa = [];
   for (const [id, proj] of leaguePts) {
     if (rostered.has(id)) continue;
     const p = playersById.get(id);
-    if (!p || !p.active || !p.team || !CORE_POSITIONS.includes(p.position)) continue;
+    if (!p || !p.active || !p.team || !posOf(ctx).includes(p.position)) continue;
     const v = valuedPlayer(id, ctx);
     if (v.ros <= 0) continue;
     const weakest = weakestStarterAt[v.position];
     const trendingAdds = trendMap.get(id) || 0;
     const nextWeekPoints = proj.byWeek[imported.currentWeek] ?? 0;
+
+    // Positional need: how far this team sits below the league average here.
+    const deficit = Math.max(0, -(need$[v.position]?.vsAverage ?? 0));
+    const needBoost = Math.min(1, deficit / 25);
+
     // Sleeper's trending counts are app-wide (millions), so they only nudge the order.
-    const score = r2(v.rawVorp + 0.5 * nextWeekPoints + Math.min(8, 2 * Math.log10(1 + trendingAdds)));
+    const score = r2(
+      v.rawVorp * (1 + 0.6 * needBoost)
+      + 0.5 * nextWeekPoints
+      + Math.min(8, 2 * Math.log10(1 + trendingAdds)),
+    );
     fa.push({
       ...v,
       score,
       trendingAdds,
       upgradeOver: weakest && v.rawVorp > weakest.rawVorp ? { id: weakest.id, name: weakest.name, vorp: weakest.vorp, gain: r2(v.rawVorp - weakest.rawVorp) } : null,
       nextWeekPoints,
+      byWeek: proj.byWeek,
+      needBoost: r2(needBoost),
+      positionNeed: r2(need$[v.position]?.vsAverage ?? 0),
+      priority: needBoost >= 0.6 ? 'high' : needBoost > 0.2 ? 'medium' : 'low',
     });
   }
   fa.sort((a, b) => b.score - a.score);
@@ -444,5 +477,157 @@ export function lineupReport(team, week, ctx) {
     ...diff,
     moves: significant ? diff.moves : [],
     note: significant ? null : `Current starters are within ${MIN_LINEUP_GAIN} projected point${MIN_LINEUP_GAIN === 1 ? '' : 's'} of optimal.`,
+  };
+}
+
+// ---------- context-aware lineup ----------
+
+/**
+ * Build one player's week with every contextual gate applied.
+ * `weekCtx` carries the NFL schedule and weather for the target week.
+ */
+export function gatedPlayer(id, week, ctx, weekCtx) {
+  const base = weeklyLineupPlayer(id, week, ctx);
+  const trends = ctx.trends;
+  const game = weekCtx?.games?.get(base.team) || null;
+  const opponent = game?.opponent || null;
+
+  const result = runGates({
+    position: base.position,
+    projectedPoints: base.points,
+    injuryStatus: base.injuryStatus,
+    onBye: base.onBye || (ctx.isCurrent && !game && !!base.team),
+    form: trends?.form?.get(String(id)) || null,
+    defense: defenseVs(trends, opponent, base.position),
+    leagueAvg: trends?.defenseLeagueAvg?.[base.position] ?? null,
+    opponent,
+    weather: weekCtx?.weather?.get(base.team) || null,
+    sheltered: game?.sheltered ?? false,
+    teamOffense: trends?.teamOffense?.get(base.team) || null,
+    teamOffenseAvg: trends?.teamOffenseAvg ?? null,
+    isHome: game?.isHome ?? null,
+  });
+
+  return {
+    ...base,
+    baseProjection: result.base,
+    points: result.adjusted, // the optimizer runs on the gated number
+    adjusted: result.adjusted,
+    adjustment: r2(result.adjusted - result.base),
+    factor: result.factor,
+    confidence: result.confidence,
+    blocked: result.blocked,
+    gates: result.gates,
+    reasons: result.reasons,
+    reasonText: result.gates[0]?.note,
+    opponent,
+    isHome: game?.isHome ?? null,
+    kickoff: game?.date || null,
+    weather: weekCtx?.weather?.get(base.team) || null,
+  };
+}
+
+/**
+ * Start/sit for one team and week, with every suggestion forced through the
+ * challenger gates. A bench player only displaces a starter when his gated
+ * projection clears a bar that widens as confidence drops.
+ */
+export function gatedLineupReport(team, week, ctx, weekCtx) {
+  const slots = starterSlots(ctx.imported.league.rosterPositions);
+  const players = (team.players || []).map((id) => gatedPlayer(id, week, ctx, weekCtx));
+  const byId = new Map(players.map((p) => [p.id, p]));
+
+  const optimal = optimizeLineup({ rosterPositions: ctx.imported.league.rosterPositions, players });
+
+  // Sleeper's starters array is positional: starters[i] fills slots[i].
+  const EMPTY = new Set(['', '0', 'null', 'undefined']);
+  const currentIds = slots.map((_, i) => {
+    const id = String((team.starters || [])[i] ?? '');
+    return EMPTY.has(id) ? '' : id;
+  });
+  const recommended = currentIds.slice();
+  const moves = [];
+  const held = [];
+
+  const candidates = slots.map((slot, i) => {
+    const incumbent = currentIds[i] ? byId.get(currentIds[i]) || null : null;
+    const proposed = optimal.starters[i]?.player ? byId.get(String(optimal.starters[i].player.id)) : null;
+    return { slot, i, incumbent, proposed };
+  }).filter((c) => c.proposed && (!c.incumbent || c.incumbent.id !== c.proposed.id));
+
+  // Best edges first, so a limited set of swaps takes the most valuable ones.
+  candidates.sort((a, b) => (b.proposed.points - (b.incumbent?.points ?? 0)) - (a.proposed.points - (a.incumbent?.points ?? 0)));
+
+  for (const c of candidates) {
+    const verdict = challengeStarter({ incumbent: c.incumbent, challenger: c.proposed, minGain: MIN_LINEUP_GAIN });
+    if (!verdict.swap) {
+      held.push({
+        slot: c.slot,
+        keep: c.incumbent?.name ?? null,
+        over: c.proposed.name,
+        reason: verdict.reason,
+        gain: verdict.gain ?? null,
+      });
+      continue;
+    }
+    if (c.proposed.id && recommended.includes(c.proposed.id)) continue; // already starting elsewhere
+    recommended[c.i] = c.proposed.id;
+    moves.push({
+      action: 'swap',
+      slot: c.slot,
+      in: {
+        id: c.proposed.id,
+        name: c.proposed.name,
+        position: c.proposed.position,
+        team: c.proposed.team,
+        opponent: c.proposed.opponent,
+        baseProjection: c.proposed.baseProjection,
+        projection: c.proposed.points,
+        confidence: c.proposed.confidence,
+        why: c.proposed.reasons,
+        weather: c.proposed.weather?.summary ?? null,
+      },
+      out: c.incumbent && {
+        id: c.incumbent.id,
+        name: c.incumbent.name,
+        baseProjection: c.incumbent.baseProjection,
+        projection: c.incumbent.points,
+        reason: c.incumbent.blocked ? c.incumbent.reasonText : (c.incumbent.reasons[0] || 'lower gated projection'),
+      },
+      gain: verdict.gain,
+      bar: verdict.bar ?? null,
+      reason: verdict.reason,
+    });
+  }
+
+  const sumOf = (ids) => r2(ids.reduce((s, id) => s + (byId.get(id)?.points ?? 0), 0));
+  const baseSumOf = (ids) => r2(ids.reduce((s, id) => s + (byId.get(id)?.baseProjection ?? 0), 0));
+
+  const contextNotes = [];
+  const weathered = players.filter((p) => p.weather && p.gates?.some((g) => g.name === 'weather' && g.verdict === 'fail'));
+  for (const p of weathered) contextNotes.push(`${p.name}: ${p.weather.summary}`);
+
+  return {
+    week,
+    slots,
+    current: currentIds.map((id, i) => ({ slot: slots[i], ...(byId.get(id) || { id: id || null, name: id ? id : '(empty)', points: 0 }) })),
+    recommended: recommended.map((id, i) => ({ slot: slots[i], ...(byId.get(id) || { id: id || null, name: id ? id : '(empty)', points: 0 }) })),
+    optimal: optimal.starters,
+    bench: optimal.bench,
+    unfilled: optimal.unfilled,
+    moves,
+    held,
+    currentTotal: sumOf(currentIds),
+    recommendedTotal: sumOf(recommended),
+    optimalTotal: optimal.total,
+    currentBaseTotal: baseSumOf(currentIds),
+    gain: r2(sumOf(recommended) - sumOf(currentIds)),
+    contextNotes,
+    note: moves.length === 0
+      ? (held.length
+        ? `No changes: ${held.length} swap${held.length === 1 ? '' : 's'} looked better on raw projection but did not clear the confidence bar.`
+        : 'Current starters already match the gate-adjusted optimal lineup.')
+      : null,
+    gatesApplied: ['availability', 'role', 'form', 'matchup', 'weather', 'gameScript'],
   };
 }
