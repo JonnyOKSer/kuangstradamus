@@ -16,12 +16,36 @@ const r2 = (x) => Number((x ?? 0).toFixed(2));
 const clamp = (x, lo, hi) => Math.min(hi, Math.max(lo, x));
 
 // What counts as a workhorse, per position.
+//
+// The volume figures are counts, so they mean the same thing everywhere. The
+// points floor does not: a league with yardage and first-down bonuses scores
+// 10-45% higher per game than plain PPR, which quietly lowered the bar. The
+// `ppg` values below are the PPR-calibrated defaults, used only when there is
+// no distribution to measure a percentile against.
 const WORKHORSE = {
   RB: { touches: 12, ppg: 9 },
   WR: { targets: 6, ppg: 8 },
   TE: { targets: 4.5, ppg: 6 },
   QB: { snapShare: 0.8, ppg: 13 },
 };
+
+/** Production floor per position, as a percentile of who actually played. */
+const PRODUCTION_PERCENTILE = 0.7;
+
+export function productionFloors(form, positions = HANDCUFF_POSITIONS) {
+  const byPos = {};
+  for (const f of form?.values?.() ?? []) {
+    if (!positions.includes(f.position) || !f.gamesPlayed || !(f.recentPPG > 0)) continue;
+    (byPos[f.position] ||= []).push(f.recentPPG);
+  }
+  const floors = {};
+  for (const [pos, list] of Object.entries(byPos)) {
+    if (list.length < 12) continue; // too thin to rank; fall back to the default
+    list.sort((a, b) => a - b);
+    floors[pos] = list[Math.floor((list.length - 1) * PRODUCTION_PERCENTILE)];
+  }
+  return floors;
+}
 
 // How much of the starter's production the next man up realistically absorbs.
 // Backfields concentrate; receiver targets scatter across the room.
@@ -30,12 +54,12 @@ const INHERITANCE = { RB: 0.7, WR: 0.45, TE: 0.55, QB: 0.6 };
 const HANDCUFF_POSITIONS = ['RB', 'WR', 'TE', 'QB'];
 
 /** Is this player carrying a starter's workload? */
-export function isWorkhorse(form, position) {
+export function isWorkhorse(form, position, ppgFloor = null) {
   const bar = WORKHORSE[position];
   // One game is enough to see a workhorse's workload; the sample size travels
   // with the result so callers can caveat it.
   if (!bar || !form || form.gamesPlayed < 1) return false;
-  if (form.recentPPG < bar.ppg) return false;
+  if (form.recentPPG < (ppgFloor ?? bar.ppg)) return false;
   if (bar.touches != null && form.touchesPerGame >= bar.touches) return true;
   if (bar.targets != null && form.targetsPerGame >= bar.targets) return true;
   if (bar.snapShare != null && (form.snapShareLast ?? form.snapShare ?? 0) >= bar.snapShare) return true;
@@ -77,6 +101,7 @@ export function findHandcuffSleepers({
     byTeamPos.get(key).push(p);
   }
 
+  const floors = productionFloors(form, positions);
   const out = [];
   const seen = new Set();
 
@@ -98,7 +123,7 @@ export function findHandcuffSleepers({
 
     const starter = ranked[0];
     const starterForm = form.get(starter?.id);
-    if (!starter || !isWorkhorse(starterForm, position)) continue;
+    if (!starter || !isWorkhorse(starterForm, position, floors[position])) continue;
 
     // The next one or two names behind him that are still free agents.
     const backups = ranked.slice(1, 4).filter((b) => !rostered.has(String(b.id)));

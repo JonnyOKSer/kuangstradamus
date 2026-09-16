@@ -77,7 +77,9 @@ export async function analyzeTrade(body, options = {}) {
   const unmatched = [];
   const valueSide = (items, label) => items.map((item) => {
     if (item.type === 'pick') {
-      const v = pickValue(item);
+      // Pick values are expressed in PPR points above replacement, so they
+      // need the same league scaling as everything else.
+      const v = pickValue(item) * (ctx.scale ?? 1);
       return { type: 'pick', name: item.name, position: 'PICK', team: null, points: 0, value: v, vorp: v, flags: [] };
     }
     const match = resolve(item.name);
@@ -126,9 +128,14 @@ export async function analyzeTrade(body, options = {}) {
   // 0 and would read as "even" however far apart their projections are. When
   // neither side clears replacement, judge on raw projected points instead.
   const belowReplacement = valueA <= 0 && valueB <= 0;
+  // A gap only counts once it is worth something on this league's own scale:
+  // 5% of the bigger side's rest-of-season points. Without it the verdict is a
+  // bare ratio, and two near-worthless players read as a fleecing.
+  const noiseFloor = 0.05 * Math.max(totalA, totalB);
   const { category, winner, marginPct } = classifyTrade(
     belowReplacement ? totalA : valueA,
     belowReplacement ? totalB : valueB,
+    { noiseFloor },
   );
 
   const names = (arr) => arr.map((p) => p.name).join(' + ') || '—';

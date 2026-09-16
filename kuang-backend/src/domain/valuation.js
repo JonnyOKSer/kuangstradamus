@@ -101,6 +101,28 @@ export function computeReplacementLevels({
   return { numTeams, rosterPositions, startersByPosition: taken, replacementRank, replacementPoints };
 }
 
+/**
+ * A league-invariant unit of value: what a replacement starter produces in a
+ * week, averaged over the skill positions the league actually starts.
+ *
+ * Constants expressed in raw points mean different things in different
+ * leagues — 25 points of VORP is two weeks of replacement production in a
+ * standard PPR league and three in a low-scoring one — so thresholds are
+ * written as multiples of this instead of as bare numbers.
+ */
+export const PPR_REPLACEMENT_PER_WEEK = 11.5; // measured in a standard 10-12 team PPR league
+
+export function replacementPerWeek(levels, activePositions = CORE_POSITIONS, weeks = 17) {
+  const core = ['RB', 'WR', 'TE', 'QB'].filter((p) => activePositions.includes(p));
+  if (!core.length || !weeks) return PPR_REPLACEMENT_PER_WEEK;
+  const avg = core.reduce((s, p) => s + (levels?.replacementPoints?.[p] ?? 0) / weeks, 0) / core.length;
+  return avg > 0 ? avg : PPR_REPLACEMENT_PER_WEEK;
+}
+
+/** Multiply a PPR-calibrated constant by this to get its equivalent here. */
+export const leagueScale = (levels, activePositions, weeks) =>
+  replacementPerWeek(levels, activePositions, weeks) / PPR_REPLACEMENT_PER_WEEK;
+
 export function playerValue(rosPts, position, levels) {
   const replacement = levels.replacementPoints[position] ?? 0;
   const rawVorp = Number(((rosPts ?? 0) - replacement).toFixed(2));
@@ -122,10 +144,19 @@ export function positionalRank(pts, position, players) {
  * Classify a trade from the two sides' total values.
  * Returns { category, winner, marginPct }.
  */
-export function classifyTrade(valueA, valueB) {
+/**
+ * @param noiseFloor the smallest gap worth calling a winner over. Without one
+ *   the verdict is pure ratio, so two waiver scrubs worth 0.1 and 0.2 came out
+ *   as "fleeces the other side" on a 50% margin.
+ */
+export function classifyTrade(valueA, valueB, { noiseFloor = 0 } = {}) {
   const max = Math.max(valueA, valueB);
   if (max <= 0) return { category: 'even', winner: null, marginPct: 0 };
-  const marginPct = Number((Math.abs(valueA - valueB) / max * 100).toFixed(1));
+  const gap = Math.abs(valueA - valueB);
+  if (gap < noiseFloor) {
+    return { category: 'even', winner: null, marginPct: Number(((gap / max) * 100).toFixed(1)), belowNoiseFloor: true };
+  }
+  const marginPct = Number((gap / max * 100).toFixed(1));
   const winner = valueA === valueB ? null : valueA > valueB ? 'A' : 'B';
   let category = 'even';
   if (marginPct >= 40) category = 'lopsided';

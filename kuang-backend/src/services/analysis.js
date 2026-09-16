@@ -5,7 +5,7 @@
 import { importLeague, getTransactions } from './sleeper/league.js';
 import { loadPlayers, getTrending } from './sleeper/players.js';
 import { buildRosTable, DEFAULT_LAST_WEEK } from './sleeper/projections.js';
-import { computeReplacementLevels, playerFlags, activePositions } from '../domain/valuation.js';
+import { computeReplacementLevels, playerFlags, activePositions, leagueScale } from '../domain/valuation.js';
 import { rosLeaguePoints, describeScoring } from '../domain/scoring.js';
 import { auditScoring, calibrationInfo } from '../domain/statDerivation.js';
 import { collectBidHistory, isFaabLeague, estimateFaab } from '../domain/faab.js';
@@ -100,6 +100,9 @@ async function build(leagueId) {
     isCurrent,
     trends,
     activePositions: activePositions(imported.league.rosterPositions),
+    // Constants below are PPR-calibrated; multiplying by this makes them mean
+    // the same thing in a league that scores 30% higher.
+    scale: leagueScale(levels, activePositions(imported.league.rosterPositions), ros.weeks.length || 17),
     byeByTeam,
     scoringAudit: auditScoring(scoring, projectedKeys),
     scoringDescription: describeScoring(scoring),

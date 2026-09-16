@@ -12,7 +12,8 @@ import { defenseVs } from '../services/nfl/usage.js';
 const r2 = (x) => Number((x ?? 0).toFixed(2));
 /** Positions this league starts — everything else is hidden, not zeroed. */
 const posOf = (ctx) => ctx.activePositions || CORE_POSITIONS;
-const MIN_LINEUP_GAIN = 1; // ignore lineup swaps worth less than a point
+const MIN_LINEUP_GAIN = 1; // a point in standard PPR; scaled per league below
+const scaleOf = (ctx) => ctx.scale || 1;
 const r1 = (x) => Number((x ?? 0).toFixed(1));
 
 // ---------- building blocks ----------
@@ -245,9 +246,11 @@ export function playoffOdds(ctx, { sims = 2000 } = {}) {
   }
 
   const means = teams.map(() => ({}));
+  // Floors are in PPR points, so they travel with the league's scale too.
+  const sdFloor = 8 * scaleOf(ctx);
   const sds = teams.map((t) => {
     const s = ap.get(t.rosterId);
-    return s && s.weeklyScores.length >= 3 ? Math.max(8, s.sdPoints) : null;
+    return s && s.weeklyScores.length >= 3 ? Math.max(sdFloor, s.sdPoints) : null;
   });
   const weeksNeeded = [...new Set(remaining.map((g) => g.week))];
   for (const w of weeksNeeded) {
@@ -257,7 +260,7 @@ export function playoffOdds(ctx, { sims = 2000 } = {}) {
     if (sds[i] == null) {
       const vals = Object.values(means[i]);
       const m = vals.length ? vals.reduce((a, b) => a + b, 0) / vals.length : 100;
-      sds[i] = Math.max(12, m * 0.2);
+      sds[i] = Math.max(1.5 * sdFloor, m * 0.2);
     }
   });
 
@@ -376,12 +379,12 @@ export function tradeTargets(ctx, rosterId, limit = 6) {
       for (const c of candidates) {
         if (c.rawVorp <= weakest || c.vorp <= 0) continue;
         const offerIdeas = myPlayers
-          .filter((p) => surpluses.some((s) => s.pos === p.position) && p.vorp > 0 && Math.abs(p.vorp - c.vorp) <= Math.max(15, c.vorp * 0.35))
+          .filter((p) => surpluses.some((s) => s.pos === p.position) && p.vorp > 0 && Math.abs(p.vorp - c.vorp) <= Math.max(15 * scaleOf(ctx), c.vorp * 0.35))
           .sort((a, b) => Math.abs(a.vorp - c.vorp) - Math.abs(b.vorp - c.vorp))
           .slice(0, 3)
           .map((p) => ({ id: p.id, name: p.name, position: p.position, vorp: p.vorp }));
         const gain = r2(c.rawVorp - weakest);
-        const needBoost = Math.min(1, Math.max(0, -d.delta) / 25);
+        const needBoost = Math.min(1, Math.max(0, -d.delta) / (25 * scaleOf(ctx)));
         targets.push({
           position: d.pos,
           partner: { rosterId: other.rosterId, teamName: other.teamName, surplusAtPosition: other.strength[d.pos].vsAverage },
@@ -450,7 +453,7 @@ export function waiverTargets(ctx, rosterId, trending = [], limit = 12, { needBy
 
     // Positional need: how far this team sits below the league average here.
     const deficit = Math.max(0, -(need$[v.position]?.vsAverage ?? 0));
-    const needBoost = Math.min(1, deficit / 25);
+    const needBoost = Math.min(1, deficit / (25 * scaleOf(ctx)));
 
     // Sleeper's trending counts are app-wide (millions), so they only nudge the order.
     const score = r2(
@@ -614,7 +617,7 @@ export function gatedLineupReport(team, week, ctx, weekCtx) {
   candidates.sort((a, b) => (b.proposed.points - (b.incumbent?.points ?? 0)) - (a.proposed.points - (a.incumbent?.points ?? 0)));
 
   for (const c of candidates) {
-    const verdict = challengeStarter({ incumbent: c.incumbent, challenger: c.proposed, minGain: MIN_LINEUP_GAIN });
+    const verdict = challengeStarter({ incumbent: c.incumbent, challenger: c.proposed, minGain: MIN_LINEUP_GAIN * scaleOf(ctx) });
     if (!verdict.swap) {
       held.push({
         slot: c.slot,
