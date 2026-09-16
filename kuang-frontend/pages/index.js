@@ -285,7 +285,7 @@ function Side({ label, name, value, peak, points, winner, belowReplacement }) {
     <div>
       <div className="flex items-baseline justify-between gap-3">
         <span className="min-w-0 truncate text-sm">
-          <span className="han mr-1.5 text-xs text-ink-400">{label}</span>
+          <span className="mr-1.5 text-[10px] font-medium uppercase tracking-wider text-ink-400">{label}</span>
           {name}
           {winner && <span className="han ml-1.5 text-cinnabar-600 dark:text-cinnabar-400">勝</span>}
         </span>

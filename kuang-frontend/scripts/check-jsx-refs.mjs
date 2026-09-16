@@ -60,6 +60,35 @@ function scan(file) {
   return [...used].filter((n) => !defined.has(n) && !imported.has(n) && !AMBIENT.has(n)).sort();
 }
 
+/**
+ * The `han` class picks the Chinese serif and is paired with cinnabar as the
+ * brand accent. Applying it to a dynamic value is how lineup slots — QB, RB,
+ * FLEX — ended up rendered as red pseudo-Chinese words scattered down the
+ * page on mobile. A literal Chinese character is fine; an interpolation is
+ * not, because nothing guarantees what lands there.
+ */
+function hanMisuse(file) {
+  const src = readFileSync(file, 'utf8');
+  const problems = [];
+
+  // `char` is the designated slot for a Chinese accent; components pass it
+  // through, so an interpolation named char is fine. Anything else is not.
+  for (const m of src.matchAll(/className="[^"]*\bhan\b[^"]*"[^>]*>\s*\{([^}]{1,60})\}/g)) {
+    const expr = m[1].trim();
+    if (/(^|\.)char$/.test(expr)) continue;
+    problems.push(`han wraps a dynamic value: {${expr}}`);
+  }
+
+  // ...and every char= actually handed to a component must be Chinese.
+  const han = /^[一-鿿]+$/;
+  for (const m of src.matchAll(/\bchar=(?:"([^"]*)"|\{'([^']*)'\}|\{"([^"]*)"\})/g)) {
+    const value = m[1] ?? m[2] ?? m[3] ?? '';
+    if (value && !han.test(value)) problems.push(`char="${value}" is not a Chinese character`);
+  }
+
+  return problems;
+}
+
 let failed = false;
 for (const root of ROOTS) {
   let files = [];
@@ -70,11 +99,16 @@ for (const root of ROOTS) {
       failed = true;
       console.error(`✗ ${relative('.', file)}: used but never defined or imported — ${missing.join(', ')}`);
     }
+    for (const problem of hanMisuse(file)) {
+      failed = true;
+      console.error(`✗ ${relative('.', file)}: ${problem}`);
+      console.error('   The han serif and cinnabar accent are for literal Chinese. Use <Slot> for lineup slots.');
+    }
   }
 }
 
 if (failed) {
-  console.error('\nA component is referenced with nothing behind it. This would be a blank page at runtime.');
+  console.error('\nFix the above before building — these are runtime breakages, not style nits.');
   process.exit(1);
 }
-console.log('✓ every component referenced in JSX is defined or imported');
+console.log('✓ every component referenced in JSX is defined or imported, and han wraps only literal Chinese');

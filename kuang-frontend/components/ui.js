@@ -23,6 +23,16 @@ export function Card({ title, char, subtitle, children, className = '', action }
 }
 
 /** A section heading with the hairline rule of a printed page. */
+/** A lineup slot (QB, FLEX, DEF). Structural, so it gets a neutral badge —
+ *  not the han-serif cinnabar treatment reserved for actual Chinese accents. */
+export function Slot({ children }) {
+  return (
+    <span className="mr-1.5 rounded-sm border border-paper-300 dark:border-ink-700 px-1.5 py-0.5 text-[10px] font-medium uppercase tracking-wider text-ink-500 dark:text-ink-400">
+      {children}
+    </span>
+  )
+}
+
 export function SectionTitle({ char, children, className = '' }) {
   return (
     <div className={`mb-3 flex items-center gap-3 ${className}`}>
@@ -149,24 +159,32 @@ export function DataTable({ head, rows, primary = 0, caption }) {
       </div>
 
       <ul className="sm:hidden space-y-2">
-        {rows.map((r, i) => (
-          <li key={i} className="rounded-sm border border-paper-300 dark:border-ink-700 px-3 py-2">
-            <div className="mb-1 font-medium">{r[primary]}</div>
-            <dl className="grid grid-cols-2 gap-x-3 gap-y-1 text-xs">
-              {r.map((c, j) => {
-                if (j === primary) return null
-                const label = head[j]
-                if (!label || c === null || c === undefined || c === '' || c === '—') return null
-                return (
-                  <div key={j} className="flex justify-between gap-2 border-b border-paper-200/70 dark:border-ink-800/70 py-0.5 last:border-0">
-                    <dt className="text-ink-500 dark:text-ink-400">{label}</dt>
-                    <dd className="nums text-right">{c}</dd>
-                  </div>
-                )
-              })}
-            </dl>
-          </li>
-        ))}
+        {rows.map((r, i) => {
+          // A column with no header is an action, not data. Skipping it the way
+          // empty values are skipped is how the Analyze button disappeared on
+          // phones, leaving no way to open a team at all.
+          const actions = r.filter((c, j) => j !== primary && !head[j] && c)
+          return (
+            <li key={i} className="rounded-sm border border-paper-300 dark:border-ink-700 px-3 py-2">
+              <div className="mb-1 font-medium">{r[primary]}</div>
+              <dl className="grid grid-cols-2 gap-x-3 gap-y-1 text-xs">
+                {r.map((c, j) => {
+                  if (j === primary || !head[j]) return null
+                  if (c === null || c === undefined || c === '' || c === '—') return null
+                  return (
+                    <div key={j} className="flex justify-between gap-2 border-b border-paper-200/70 dark:border-ink-800/70 py-0.5 last:border-0">
+                      <dt className="text-ink-500 dark:text-ink-400">{head[j]}</dt>
+                      <dd className="nums text-right">{c}</dd>
+                    </div>
+                  )
+                })}
+              </dl>
+              {actions.length > 0 && (
+                <div className="mt-2 flex flex-wrap gap-2 [&_button]:w-full">{actions}</div>
+              )}
+            </li>
+          )
+        })}
       </ul>
 
       {caption && <p className="mt-2 text-xs text-ink-500 dark:text-ink-300">{caption}</p>}

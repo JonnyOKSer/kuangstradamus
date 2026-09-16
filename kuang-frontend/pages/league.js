@@ -4,7 +4,7 @@ import { useEffect, useState } from 'react'
 import Head from 'next/head'
 import Layout from '../components/Layout'
 import Seal from '../components/Seal'
-import { Button, Card, DataTable, Delta, Field, Note, Pill, SectionTitle, Stat, Tab } from '../components/ui'
+import { Button, Card, DataTable, Delta, Field, Note, Pill, SectionTitle, Slot, Stat, Tab } from '../components/ui'
 import { api, fmt } from '../lib/api'
 import { useUI } from '../lib/ui'
 
@@ -554,7 +554,7 @@ function LineupCard({ lineup, autoSet }) {
             {lineup.moves.map((m, i) => (
               <li key={i} className="rounded-sm border border-paper-300 dark:border-ink-700 px-3 py-2 text-sm">
                 <p>
-                  <span className="han mr-1.5 text-xs text-cinnabar-600 dark:text-cinnabar-400">{m.slot}</span>
+                  <Slot>{m.slot}</Slot>
                   {t('start', '先发')} <b>{m.in.name}</b>
                   <span className="text-ink-500 dark:text-ink-400"> ({m.in.position} {m.in.team}{m.in.opponent ? ` vs ${m.in.opponent}` : ''})</span>
                   {m.out && <> · {t('bench', '替补')} <b>{m.out.name}</b></>}
@@ -606,7 +606,7 @@ function LineupCard({ lineup, autoSet }) {
             <div key={i} className="rounded-sm border border-paper-300 dark:border-ink-700 px-3 py-2">
               <div className="flex flex-wrap items-baseline justify-between gap-2 text-sm">
                 <span>
-                  <span className="han mr-1.5 text-xs text-cinnabar-600 dark:text-cinnabar-400">{s.slot}</span>
+                  <Slot>{s.slot}</Slot>
                   {s.name}
                   {s.position && <span className="text-ink-500 dark:text-ink-400"> ({s.position} {s.team || ''}{s.opponent ? ` vs ${s.opponent}` : ''})</span>}
                 </span>
