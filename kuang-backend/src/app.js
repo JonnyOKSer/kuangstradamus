@@ -5,6 +5,8 @@ import cors from 'cors';
 import tradeRoutes from './routes/trade.js';
 import chatRoutes from './routes/chat.js';
 import leagueRoutes from './routes/league.js';
+import authRoutes from './routes/auth.js';
+import { requireAccess, gateEnabled } from './services/auth.js';
 import { startRefreshLoop } from './services/refresh.js';
 
 const app = express();
@@ -37,6 +39,10 @@ app.use(cors(corsOptions));
 app.options('*', cors(corsOptions));
 app.use(express.json({ limit: '100kb' }));
 
+// The gate itself is always reachable; everything behind it is not.
+app.use('/api/auth', authRoutes);
+app.use('/api', requireAccess);
+
 app.use('/api', tradeRoutes);
 app.use('/api/chat', chatRoutes);
 app.use('/api/league', leagueRoutes);
@@ -47,7 +53,10 @@ app.get('/', (_req, res) => {
 
 app.get('/api', (_req, res) => {
   res.json({
+    access: gateEnabled() ? 'An access code is required. POST /api/auth { code } for a token.' : 'open',
     endpoints: {
+      'GET /api/auth/status': 'whether an access code is required',
+      'POST /api/auth': '{ code } → { token, expiresAt }',
       'POST /api/chat': '{ message, lang?, scoring?, leagueId? } → verdict + proverb',
       'POST /api/trade': '{ message } | { teamA, teamB } (+ scoring?, leagueId?) → full analysis',
       'GET /api/players/search?q=': 'player autocomplete',
@@ -76,6 +85,9 @@ app.use((err, _req, res, _next) => {
 if (process.env.NODE_ENV !== 'test') {
   app.listen(PORT, () => {
     console.log(`🚀 Kuangstradamus API live on port ${PORT}`);
+    console.log(gateEnabled()
+      ? '🔒 Access gate ON (ACCESS_CODE is set)'
+      : '🔓 Access gate OFF — set ACCESS_CODE to require a code');
     // Warms every cache now and keeps them fresh on a 6-hour clock.
     startRefreshLoop();
   });

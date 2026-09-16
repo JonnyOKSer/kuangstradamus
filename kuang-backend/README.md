@@ -30,6 +30,25 @@ npm test           # node --test (no network needed)
 | POST | `/api/league/:leagueId/team/:rosterId/lineup/apply` | | `501` — Sleeper has no official write API |
 | GET | `/api/health` | | liveness + cache stats + last data refresh |
 | POST | `/api/refresh` | header `x-refresh-token` when `REFRESH_TOKEN` is set | force a data refresh |
+| GET | `/api/auth/status` | | whether an access code is required |
+| POST | `/api/auth` | `{ code }` | `{ token, expiresAt }` |
+
+## Access gate
+
+Set `ACCESS_CODE` to make the site private. The code is exchanged once for an
+HMAC-signed bearer token that the browser keeps for 30 days; every request to a
+data route must carry it. Enforcement is here rather than in the frontend
+because this process is where the data actually lives — a browser-side gate
+would leave the API open to anyone with curl.
+
+- `ACCESS_CODE` unset (the default) leaves every route open, so the service
+  keeps working until the variable is deliberately set.
+- `/api/health`, `/api` and `/api/refresh` stay reachable without a code, as
+  does CORS preflight.
+- Failed attempts are throttled to 10 per 15 minutes per client.
+- Tokens are signed with `AUTH_SECRET` when set, otherwise with the code
+  itself — so **rotating `ACCESS_CODE` immediately invalidates every token
+  already issued**, which is usually what you want from a shared code.
 
 Example:
 
