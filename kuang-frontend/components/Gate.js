@@ -1,8 +1,13 @@
 import { useState } from 'react'
 import Head from 'next/head'
+import Image from 'next/image'
+import Seal from './Seal'
+import { Button, Field } from './ui'
 import { redeemCode } from '../lib/api'
+import { useUI } from '../lib/ui'
 
 export default function Gate({ onUnlock }) {
+  const { t } = useUI()
   const [code, setCode] = useState('')
   const [error, setError] = useState('')
   const [busy, setBusy] = useState(false)
@@ -24,37 +29,50 @@ export default function Gate({ onUnlock }) {
   }
 
   return (
-    <div className="min-h-screen flex flex-col items-center justify-center p-6 bg-white dark:bg-black text-black dark:text-white">
-      <Head>
-        <title>Kuangstradamus</title>
-      </Head>
+    <div className="flex min-h-screen items-center justify-center px-5 py-10">
+      <Head><title>Kuangstradamus</title></Head>
 
-      <div className="w-full max-w-sm text-center">
-        <div className="text-5xl mb-3" aria-hidden="true">🔮</div>
-        <h1 className="text-2xl font-bold mb-1">Kuangstradamus</h1>
-        <p className="text-sm opacity-70 mb-6">The oracle is private. Enter your access code.</p>
+      <div className="w-full max-w-xs text-center">
+        <div className="relative mx-auto mb-6 h-28 w-28">
+          <Image
+            src="/kuang.png"
+            alt=""
+            width={224}
+            height={224}
+            unoptimized
+            priority
+            className="h-28 w-28 rounded-full object-cover grayscale"
+          />
+          <span className="pointer-events-none absolute inset-0 rounded-full ring-1 ring-paper-400/70 dark:ring-ink-700" />
+        </div>
 
-        <form onSubmit={submit} className="flex flex-col gap-3">
-          <input
+        <h1 className="font-display text-2xl tracking-[0.12em]">KUANGSTRADAMUS</h1>
+        <p className="han mt-1 text-xs text-ink-500 dark:text-ink-400">闭门 · 请出示口令</p>
+        <p className="mt-3 text-sm text-ink-500 dark:text-ink-300">
+          {t('The oracle keeps a closed door. Speak the word.', '神谕闭门，请说出口令。')}
+        </p>
+
+        <form onSubmit={submit} className="mt-6 space-y-3">
+          <Field
             value={code}
             onChange={(e) => setCode(e.target.value)}
-            placeholder="Access code"
+            placeholder={t('Access code', '访问口令')}
             autoFocus
             autoComplete="off"
-            aria-label="Access code"
-            className="border border-gray-400 dark:border-gray-600 rounded p-3 text-center tracking-widest bg-white dark:bg-gray-900 focus:outline-none focus:ring-2 focus:ring-indigo-400"
+            autoCapitalize="none"
+            spellCheck="false"
+            aria-label={t('Access code', '访问口令')}
+            className="text-center tracking-[0.3em]"
           />
-          <button
-            type="submit"
-            disabled={busy || !code.trim()}
-            className="bg-black dark:bg-white text-white dark:text-black px-6 py-3 rounded font-semibold shadow-md hover:opacity-90 disabled:opacity-50"
-          >
-            {busy ? 'Checking…' : 'Enter'}
-          </button>
+          <Button type="submit" disabled={busy || !code.trim()} className="w-full">
+            {busy ? t('Consulting…', '占卜中……') : <><Seal char="启" size={18} /> {t('Enter', '入门')}</>}
+          </Button>
         </form>
 
-        {error && <p className="text-red-600 dark:text-red-400 mt-3 text-sm">⚠️ {error}</p>}
-        <p className="text-xs opacity-50 mt-6">Access is remembered on this device for 30 days.</p>
+        {error && <p className="mt-3 text-sm text-cinnabar-600 dark:text-cinnabar-400">{error}</p>}
+        <p className="mt-8 text-[11px] text-ink-400 dark:text-ink-500">
+          {t('Remembered on this device for 30 days.', '本设备记住 30 天。')}
+        </p>
       </div>
     </div>
   )
