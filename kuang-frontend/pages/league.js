@@ -473,8 +473,8 @@ function LineupCard({ lineup, autoSet }) {
       title={t(`Start / sit · week ${lineup.week}`, `先发建议 · 第 ${lineup.week} 周`)}
       char="阵"
       subtitle={t(
-        'Every projection re-scored through six gates — availability, role, form, matchup, weather, game script.',
-        '每份预测都经过六道关卡：可用性、角色、状态、对位、天气、比赛走向。',
+        'Availability, weather and matchup adjust the projection. Role, form and game script are shown as context — backtesting says the projection already prices them in.',
+        '可用性、天气与对位会调整预测；角色、状态与比赛走向仅作参考——回测显示预测本身已包含这些因素。',
       )}
     >
       {lineup.moves.length === 0 ? (
@@ -546,13 +546,27 @@ function LineupCard({ lineup, autoSet }) {
               </div>
               {s.gates && (
                 <ul className="mt-1 space-y-0.5 text-xs">
-                  {s.gates.map((g) => (
-                    <li key={g.name} className={`flex gap-2 ${g.verdict === 'fail' ? 'text-rust-600 dark:text-rust-400' : g.verdict === 'pass' ? 'text-jade-700 dark:text-jade-400' : 'text-ink-400 dark:text-ink-500'}`}>
-                      <span className="w-20 shrink-0">{g.name}</span>
-                      <span className="nums w-12 shrink-0">×{g.factor}</span>
-                      <span className="min-w-0">{g.note}</span>
-                    </li>
-                  ))}
+                  {s.gates.map((g) => {
+                    const tone = !g.applied
+                      ? 'text-ink-400 dark:text-ink-500'
+                      : g.verdict === 'fail' ? 'text-rust-600 dark:text-rust-400'
+                        : g.verdict === 'pass' ? 'text-jade-700 dark:text-jade-400'
+                          : 'text-ink-500 dark:text-ink-400'
+                    return (
+                      <li key={g.name} className={`flex gap-2 ${tone}`}>
+                        <span className="w-20 shrink-0">{g.name}</span>
+                        <span className="nums w-14 shrink-0">
+                          {g.applied ? `×${fmt(g.effect, 2)}` : t('context', '参考')}
+                        </span>
+                        <span className="min-w-0">
+                          {g.note}
+                          {g.applied && g.weight !== 1 && (
+                            <span className="opacity-60"> ({t('raw', '原始')} ×{fmt(g.factor, 2)}, {t('weight', '权重')} {g.weight})</span>
+                          )}
+                        </span>
+                      </li>
+                    )
+                  })}
                 </ul>
               )}
             </div>
