@@ -1,23 +1,38 @@
-import OpenAI from 'openai';
+// Proverbs come from a pregenerated bilingual bank (src/data/proverbs.json),
+// keyed by how lopsided the trade is. No model call at runtime, no API key.
 
-const openai = new OpenAI({
-  apiKey: process.env.OPENAI_API_KEY || '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', // Railway injects this
-});
+import { readFileSync } from 'node:fs';
+import path from 'node:path';
+import { fileURLToPath } from 'node:url';
 
-export async function generateProverb(tradeText) {
-  const prompt = `Create a wise, poetic Chinese-style proverb based on this fantasy football trade: "${tradeText}". The proverb should sound ancient and metaphorical. Respond only with the proverb.`;
+const here = path.dirname(fileURLToPath(import.meta.url));
+const BANK = JSON.parse(readFileSync(path.join(here, '../data/proverbs.json'), 'utf8'));
 
-  try {
-    const completion = await openai.chat.completions.create({
-      model: 'gpt-4o',
-      messages: [{ role: 'user', content: prompt }],
-      temperature: 0.9,
-    });
+export const PROVERB_CATEGORIES = Object.keys(BANK);
+export const FALLBACK_PROVERB = { en: 'A silent river hides the deepest stones.', zh: '静水之下，藏最深之石。' };
 
-    const reply = completion.choices[0]?.message?.content?.trim();
-    return reply || 'A silent river hides the deepest stones.';
-  } catch (err) {
-    console.error('🧨 OpenAI proverb generation failed:', err);
-    return 'A silent river hides the deepest stones.';
+function hash(str) {
+  let h = 2166136261;
+  for (let i = 0; i < str.length; i++) {
+    h ^= str.charCodeAt(i);
+    h = Math.imul(h, 16777619);
   }
+  return h >>> 0;
+}
+
+/**
+ * Pick a proverb for a trade category. Pass `seed` to make the choice
+ * deterministic (same trade → same prophecy); omit it for a random one.
+ */
+export function pickProverb(category = 'general', seed) {
+  const key = BANK[category]?.length ? category : 'general';
+  const pool = BANK[key];
+  if (!pool?.length) return { ...FALLBACK_PROVERB, category: 'general' };
+  const idx = seed == null ? Math.floor(Math.random() * pool.length) : hash(String(seed)) % pool.length;
+  return { ...pool[idx], category: key };
+}
+
+/** Kept for compatibility with older call sites. */
+export async function generateProverb(tradeText, category = 'general') {
+  return pickProverb(category);
 }

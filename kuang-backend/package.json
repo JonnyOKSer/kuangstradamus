@@ -1,31 +1,33 @@
 {
   "name": "kuangstraadamus",
   "version": "1.0.0",
-  "description": "Virtual trade commissioner for fantasy football trades",
+  "description": "Fantasy football trade commissioner and league analyst (free Sleeper data)",
   "type": "module",
   "main": "src/app.js",
   "scripts": {
     "start": "node src/app.js",
-    "dev": "nodemon src/app.js"
+    "dev": "nodemon src/app.js",
+    "test": "node --test test/"
   },
   "keywords": [
     "fantasy football",
     "trade analyzer",
-    "ESPN",
-    "PPR",
-    "bot"
+    "sleeper",
+    "lineup optimizer",
+    "PPR"
   ],
   "author": "JonnyOK",
   "license": "MIT",
   "dependencies": {
-    "axios": "^1.10.0",
     "cors": "^2.8.5",
     "dotenv": "^16.3.1",
     "express": "^4.18.2",
-    "fuse.js": "^7.1.0",
-    "openai": "^5.9.0"
+    "fuse.js": "^7.1.0"
   },
   "devDependencies": {
     "nodemon": "^3.0.3"
+  },
+  "engines": {
+    "node": ">=20"
   }
 }

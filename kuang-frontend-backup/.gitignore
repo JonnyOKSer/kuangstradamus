@@ -1,9 +1,0 @@
-node_modules/
-.next/
-dist/
-.env
-*.log
-node_modules/
-.next/
-.DS_Store
-dist/
