@@ -42,7 +42,8 @@ const r2 = (x) => Number((x ?? 0).toFixed(2));
  *   teamOffense: Map<string, object>,   // team -> recent scoring volume
  * }}
  */
-export async function buildTrendTables({ season, throughWeek, lookback = DEFAULT_LOOKBACK, scoringSettings = {} }) {
+export async function buildTrendTables({ season, throughWeek, lookback = DEFAULT_LOOKBACK, scoringSettings = {}, scorer = null }) {
+  const score = scorer || ((stats) => scoreStats(stats, scoringSettings));
   const weeks = [];
   for (let w = Math.max(1, throughWeek - lookback + 1); w <= throughWeek; w++) weeks.push(w);
   if (!weeks.length) {
@@ -61,7 +62,7 @@ export async function buildTrendTables({ season, throughWeek, lookback = DEFAULT
       const { stats, position } = row;
       if (!position || !TREND_POSITIONS.includes(position)) continue;
       const played = (stats.gp ?? 0) > 0 || (stats.off_snp ?? 0) > 0 || position === 'DEF';
-      const pts = scoreStats(stats, scoringSettings);
+      const pts = score(stats);
 
       // ---- player form & usage ----
       let f = form.get(row.playerId);
