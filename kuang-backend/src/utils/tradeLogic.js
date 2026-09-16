@@ -3,6 +3,7 @@
 // PPR / half / standard) or against an imported Sleeper league, in which case
 // the league's exact scoring rules and roster slots are used.
 
+import PICK_CAL from '../data/pickCalibration.json' with { type: 'json' };
 import { normalizeTradeRequest } from '../domain/tradeParser.js';
 import { loadPlayers } from '../services/sleeper/players.js';
 import { buildRosTable, getState, DEFAULT_LAST_WEEK, SCORING_FORMATS } from '../services/sleeper/projections.js';
@@ -42,6 +43,8 @@ async function standaloneContext({ scoring, season, playoffWeeks }) {
     throughWeek: ros.throughWeek,
     scoringLabel: { ppr: 'PPR', half_ppr: 'Half PPR', std: 'Standard' }[format],
     leagueName: null,
+    leagueType: 'redraft',   // no league given: assume the common case
+    scale: 1,
   };
 }
 
@@ -59,6 +62,8 @@ async function leagueContext(leagueId) {
     throughWeek: ctx.ros.throughWeek,
     scoringLabel: ctx.scoringDescription,
     leagueName: ctx.imported.league.name,
+    leagueType: ctx.imported.league.leagueType || 'redraft',
+    scale: ctx.scale ?? 1,
   };
 }
 
@@ -77,10 +82,38 @@ export async function analyzeTrade(body, options = {}) {
   const unmatched = [];
   const valueSide = (items, label) => items.map((item) => {
     if (item.type === 'pick') {
-      // Pick values are expressed in PPR points above replacement, so they
-      // need the same league scaling as everything else.
-      const v = pickValue(item) * (ctx.scale ?? 1);
-      return { type: 'pick', name: item.name, position: 'PICK', team: null, points: 0, value: v, vorp: v, flags: [] };
+      const pv = pickValue(item, {
+        calibration: PICK_CAL,
+        currentSeason: Number(ctx.season) || undefined,
+        leagueType: ctx.leagueType || 'redraft',
+        scale: ctx.scale ?? 1,
+      });
+      const flags = [];
+      if (pv.seasonsAway > 0 && pv.value === 0) {
+        flags.push({
+          type: 'pick',
+          level: 'medium',
+          text: `A ${item.year} pick scores nothing for this season in a redraft league. Historically worth ${pv.whenUsed} above replacement once used, and useful ${Math.round((pv.usefulRate ?? 0) * 100)}% of the time.`,
+        });
+      } else if (pv.seasonsAway > 0) {
+        flags.push({
+          type: 'pick',
+          level: 'low',
+          text: `Counted at ${pv.value} of its ${pv.whenUsed} value, ${pv.seasonsAway} season${pv.seasonsAway === 1 ? '' : 's'} out in a ${pv.leagueType} league.`,
+        });
+      }
+      return {
+        type: 'pick',
+        name: item.name,
+        position: 'PICK',
+        team: null,
+        points: 0,
+        value: pv.value,
+        vorp: pv.value,
+        rawValue: pv.whenUsed,
+        pick: pv,
+        flags,
+      };
     }
     const match = resolve(item.name);
     if (!match?.player) {

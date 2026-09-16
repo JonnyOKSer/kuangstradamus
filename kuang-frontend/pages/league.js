@@ -118,11 +118,11 @@ export default function LeaguePage() {
           {/* With a league open and nothing typed, the useful action is back to
               the list — not a second import of what is already on screen. */}
           {summary && !query.trim() ? (
-            <Button type="button" variant="quiet" onClick={goBack} className="sm:w-auto">
+            <Button type="button" variant="quiet" onClick={goBack} className="sm:w-auto sm:min-w-36">
               ← {t('Go back', '返回')}
             </Button>
           ) : (
-            <Button type="submit" disabled={!!loading || !query.trim()} className="sm:w-auto">
+            <Button type="submit" disabled={!!loading || !query.trim()} className="sm:w-auto sm:min-w-36">
               <Seal char="卜" size={18} /> {t('Find leagues', '查找联盟')}
             </Button>
           )}

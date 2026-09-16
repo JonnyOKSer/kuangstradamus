@@ -1,0 +1,122 @@
+{
+  "seasons": [
+    2021,
+    2025
+  ],
+  "teams": 12,
+  "rounds": {
+    "1": {
+      "n": 60,
+      "value": 116,
+      "median": 98.6,
+      "nextYear": 95.4,
+      "usefulRate": 0.9
+    },
+    "2": {
+      "n": 60,
+      "value": 80.6,
+      "median": 76,
+      "nextYear": 84.2,
+      "usefulRate": 0.85
+    },
+    "3": {
+      "n": 60,
+      "value": 61.7,
+      "median": 57.6,
+      "nextYear": 57.3,
+      "usefulRate": 0.7
+    },
+    "4": {
+      "n": 60,
+      "value": 41.1,
+      "median": 27.6,
+      "nextYear": 38.4,
+      "usefulRate": 0.6
+    },
+    "5": {
+      "n": 60,
+      "value": 41.3,
+      "median": 22.8,
+      "nextYear": 28.3,
+      "usefulRate": 0.617
+    },
+    "6": {
+      "n": 60,
+      "value": 35.4,
+      "median": 19.5,
+      "nextYear": 27.6,
+      "usefulRate": 0.617
+    },
+    "7": {
+      "n": 60,
+      "value": 29.1,
+      "median": 8.6,
+      "nextYear": 17.4,
+      "usefulRate": 0.533
+    },
+    "8": {
+      "n": 60,
+      "value": 21.6,
+      "median": 0,
+      "nextYear": 11.5,
+      "usefulRate": 0.467
+    },
+    "9": {
+      "n": 60,
+      "value": 21.6,
+      "median": 0,
+      "nextYear": 23.3,
+      "usefulRate": 0.433
+    },
+    "10": {
+      "n": 60,
+      "value": 18,
+      "median": 0,
+      "nextYear": 16.3,
+      "usefulRate": 0.333
+    },
+    "11": {
+      "n": 60,
+      "value": 13.8,
+      "median": 0,
+      "nextYear": 15.5,
+      "usefulRate": 0.35
+    },
+    "12": {
+      "n": 60,
+      "value": 11.9,
+      "median": 0,
+      "nextYear": 13.4,
+      "usefulRate": 0.317
+    },
+    "13": {
+      "n": 60,
+      "value": 4.3,
+      "median": 0,
+      "nextYear": 3.1,
+      "usefulRate": 0.1
+    },
+    "14": {
+      "n": 60,
+      "value": 8,
+      "median": 0,
+      "nextYear": 9.3,
+      "usefulRate": 0.2
+    },
+    "15": {
+      "n": 60,
+      "value": 8.4,
+      "median": 0,
+      "nextYear": 10.5,
+      "usefulRate": 0.217
+    },
+    "16": {
+      "n": 60,
+      "value": 3.8,
+      "median": 0,
+      "nextYear": 8.7,
+      "usefulRate": 0.15
+    }
+  },
+  "generatedAt": "2026-09-16T17:15:06.326Z"
+}

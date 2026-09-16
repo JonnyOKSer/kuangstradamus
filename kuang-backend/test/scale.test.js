@@ -75,3 +75,55 @@ test('a measured floor overrides the default in both directions', () => {
   assert.equal(isWorkhorse(f, 'RB', 9), true, 'clears a low floor');
   assert.equal(isWorkhorse(f, 'RB', 14), false, 'fails a high one');
 });
+
+/* --- draft picks, measured rather than assumed --- */
+
+import { pickValue } from '../src/domain/valuation.js';
+import { parseItem } from '../src/domain/tradeParser.js';
+import PICK_CAL from '../src/data/pickCalibration.json' with { type: 'json' };
+
+test('pick rounds parse past the fifth', () => {
+  const eighth = parseItem('a 2027 8th', { defaultPickYear: 2027 });
+  assert.equal(eighth.type, 'pick');
+  assert.equal(eighth.round, 8);
+  assert.equal(eighth.year, 2027);
+  assert.equal(parseItem('round 12 pick in 2027').round, 12);
+  assert.equal(parseItem('eleventh round pick', { defaultPickYear: 2027 }).round, 11);
+  assert.equal(parseItem('Jauan Jennings').type, 'player', 'a name is still a name');
+});
+
+test('pick value falls monotonically by round', () => {
+  const at = (round) => pickValue({ round, year: 2026 }, { calibration: PICK_CAL, currentSeason: 2026 }).whenUsed;
+  assert.ok(at(1) > at(3), `${at(1)} should beat ${at(3)}`);
+  assert.ok(at(3) > at(8));
+  assert.ok(at(8) > at(16));
+  assert.ok(at(1) > 80, 'a first-rounder is a starter, not a lottery ticket');
+});
+
+test('a future pick scores nothing this season in a redraft league', () => {
+  const r = pickValue({ round: 8, year: 2027 }, { calibration: PICK_CAL, currentSeason: 2026, leagueType: 'redraft' });
+  assert.equal(r.value, 0);
+  assert.ok(r.whenUsed > 0, 'but it is still worth something when it converts');
+  assert.equal(r.seasonsAway, 1);
+});
+
+test('keeper and dynasty carry a future pick forward, redraft does not', () => {
+  const opts = { calibration: PICK_CAL, currentSeason: 2026 };
+  const redraft = pickValue({ round: 1, year: 2027 }, { ...opts, leagueType: 'redraft' }).value;
+  const keeper = pickValue({ round: 1, year: 2027 }, { ...opts, leagueType: 'keeper' }).value;
+  const dynasty = pickValue({ round: 1, year: 2027 }, { ...opts, leagueType: 'dynasty' }).value;
+  assert.equal(redraft, 0);
+  assert.ok(dynasty > keeper && keeper > redraft);
+});
+
+test("this season's own pick counts in full regardless of league type", () => {
+  const r = pickValue({ round: 2, year: 2026 }, { calibration: PICK_CAL, currentSeason: 2026, leagueType: 'redraft' });
+  assert.equal(r.value, r.whenUsed);
+  assert.equal(r.seasonsAway, 0);
+});
+
+test('pick values scale with the league like every other constant', () => {
+  const base = pickValue({ round: 1, year: 2026 }, { calibration: PICK_CAL, currentSeason: 2026, scale: 1 }).whenUsed;
+  const rich = pickValue({ round: 1, year: 2026 }, { calibration: PICK_CAL, currentSeason: 2026, scale: 1.3 }).whenUsed;
+  assert.ok(Math.abs(rich - base * 1.3) < 0.1);
+});

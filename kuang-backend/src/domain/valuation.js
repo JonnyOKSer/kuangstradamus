@@ -18,9 +18,18 @@ export const FLEX_ELIGIBILITY = {
 export const NON_STARTING_SLOTS = new Set(['BN', 'IR', 'TAXI']);
 export const CORE_POSITIONS = ['QB', 'RB', 'WR', 'TE', 'K', 'DEF'];
 
-// Rough pick values expressed in "ROS points above replacement".
-// Only used when a trade includes draft picks.
-export const PICK_VALUES = { 1: 45, 2: 18, 3: 7, 4: 3, 5: 1 };
+// Measured draft-pick values, in PPR points above replacement, from
+// scripts/calibrate-picks.js over 2021-2025. Kept as a fallback for rounds the
+// calibration does not cover.
+export const PICK_VALUES = { 1: 116, 2: 81, 3: 62, 4: 41, 5: 41, 6: 35, 7: 29, 8: 22, 9: 22, 10: 18 };
+
+// How much of a future pick's value counts toward a trade judged on this
+// season. In a redraft league the honest answer is none — next year's pick
+// scores no points for the roster you are fielding now — so the analyzer
+// reports it separately rather than folding a discounted guess into the
+// headline. Keeper and dynasty leagues carry the asset forward.
+export const FUTURE_PICK_WEIGHT = { redraft: 0, keeper: 0.5, dynasty: 0.85 };
+export const LEAGUE_TYPES = { 0: 'redraft', 1: 'keeper', 2: 'dynasty' };
 
 export function starterSlots(rosterPositions) {
   return rosterPositions.filter((s) => !NON_STARTING_SLOTS.has(s));
@@ -129,8 +138,41 @@ export function playerValue(rosPts, position, levels) {
   return { ros: Number((rosPts ?? 0).toFixed(2)), replacement, vorp: Math.max(0, rawVorp), rawVorp };
 }
 
-export function pickValue(pick) {
-  return PICK_VALUES[pick.round] ?? 0;
+/**
+ * What a draft pick is worth.
+ *
+ * @param pick          { round, year }
+ * @param calibration   src/data/pickCalibration.json, when available
+ * @param currentSeason the season the trade is being judged in
+ * @param leagueType    'redraft' | 'keeper' | 'dynasty'
+ * @param scale         this league's scoring scale (see leagueScale)
+ *
+ * Returns both numbers, because they answer different questions: `value` is
+ * what the pick contributes to a trade judged on this season, and `whenUsed`
+ * is what the slot has historically returned once it is actually drafted.
+ */
+export function pickValue(pick, {
+  calibration = null,
+  currentSeason = null,
+  leagueType = 'redraft',
+  scale = 1,
+} = {}) {
+  const round = Number(pick?.round) || 0;
+  const measured = calibration?.rounds?.[round]?.value;
+  const whenUsed = Number(((measured ?? PICK_VALUES[round] ?? 0) * scale).toFixed(2));
+
+  const seasonsAway = currentSeason && pick?.year ? Math.max(0, Number(pick.year) - Number(currentSeason)) : 0;
+  const weight = seasonsAway === 0 ? 1 : (FUTURE_PICK_WEIGHT[leagueType] ?? 0) ** seasonsAway;
+
+  return {
+    value: Number((whenUsed * weight).toFixed(2)),
+    whenUsed,
+    seasonsAway,
+    leagueType,
+    usefulRate: calibration?.rounds?.[round]?.usefulRate ?? null,
+    median: calibration?.rounds?.[round]?.median ?? null,
+    basis: measured != null ? 'measured' : 'fallback',
+  };
 }
 
 /** Positional rank of a points total among all players at that position. */

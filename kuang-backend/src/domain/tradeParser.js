@@ -5,17 +5,38 @@
 const SIDE_SPLIT = /\s+(?:in\s+exchange\s+for|for|→|->|<->|⇄)\s+/i;
 const ITEM_SPLIT = /\s*(?:,|;|\s+and\s+|\s+&\s+|\s+\+\s+|\s+plus\s+)\s*/i;
 
-const ROUND_WORDS = { first: 1, second: 2, third: 3, fourth: 4, fifth: 5, '1st': 1, '2nd': 2, '3rd': 3, '4th': 4, '5th': 5 };
-const PICK_RE = /^(?:(?:a|an|the)\s+)?(?:(\d{4})\s+)?(first|second|third|fourth|fifth|1st|2nd|3rd|4th|5th)(?:\s+round)?(?:\s+(?:pick|rounder))?(?:\s+(?:in\s+)?(\d{4}))?$/i;
+// Rounds run as deep as a draft does, not just the first five — "a 2027 8th"
+// was previously parsed as a player name and sent to the name resolver.
+const ROUND_WORDS = {
+  first: 1, second: 2, third: 3, fourth: 4, fifth: 5, sixth: 6, seventh: 7, eighth: 8,
+  ninth: 9, tenth: 10, eleventh: 11, twelfth: 12, thirteenth: 13, fourteenth: 14,
+  fifteenth: 15, sixteenth: 16,
+};
+const MAX_ROUND = 20;
+const ORDINAL = '(?:\\d{1,2}(?:st|nd|rd|th)|first|second|third|fourth|fifth|sixth|seventh|eighth|ninth|tenth|eleventh|twelfth|thirteenth|fourteenth|fifteenth|sixteenth)';
+const PICK_RE = new RegExp(
+  `^(?:(?:a|an|the)\\s+)?(?:(\\d{4})\\s+)?(?:round\\s+(\\d{1,2})|${ORDINAL})(?:\\s+round)?(?:\\s+(?:pick|rounder|selection))?(?:\\s+(?:in\\s+)?(\\d{4}))?$`,
+  'i',
+);
+
+function roundFrom(match) {
+  if (match[2]) return Number(match[2]);              // "round 8"
+  const token = match[0].match(new RegExp(ORDINAL, 'i'))?.[0]?.toLowerCase();
+  if (!token) return null;
+  const digits = token.match(/^\d{1,2}/);
+  return digits ? Number(digits[0]) : (ROUND_WORDS[token] ?? null);
+}
 
 export function parseItem(raw, { defaultPickYear } = {}) {
   const text = raw.trim().replace(/\s+/g, ' ');
   if (!text) return null;
   const pick = text.match(PICK_RE);
   if (pick) {
-    const year = Number(pick[1] || pick[3] || defaultPickYear || new Date().getFullYear() + 1);
-    const round = ROUND_WORDS[pick[2].toLowerCase()];
-    return { type: 'pick', year, round, name: `${year} ${ordinal(round)} round pick` };
+    const round = roundFrom(pick);
+    if (round && round >= 1 && round <= MAX_ROUND) {
+      const year = Number(pick[1] || pick[3] || defaultPickYear || new Date().getFullYear() + 1);
+      return { type: 'pick', year, round, name: `${year} ${ordinal(round)} round pick` };
+    }
   }
   return { type: 'player', name: text.replace(/^(?:a|an|the|my|his|her|their|our)\s+/i, '') };
 }
@@ -50,5 +71,7 @@ export function normalizeTradeRequest(body = {}, opts = {}) {
 }
 
 function ordinal(n) {
-  return ({ 1: '1st', 2: '2nd', 3: '3rd' })[n] || `${n}th`;
+  const v = n % 100;
+  if (v >= 11 && v <= 13) return `${n}th`;
+  return `${n}${({ 1: 'st', 2: 'nd', 3: 'rd' })[n % 10] || 'th'}`;
 }

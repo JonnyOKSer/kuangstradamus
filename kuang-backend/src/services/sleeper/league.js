@@ -108,6 +108,8 @@ export async function importLeague(leagueId) {
       tradeDeadline: settings.trade_deadline ?? null,
       waiverType: settings.waiver_type ?? null,
       waiverBudget: settings.waiver_budget ?? null,
+      type: settings.type ?? 0,
+      leagueType: ({ 0: 'redraft', 1: 'keeper', 2: 'dynasty' })[settings.type ?? 0] || 'redraft',
       previousLeagueId: league.previous_league_id || null,
       avatar: league.avatar || null,
     },

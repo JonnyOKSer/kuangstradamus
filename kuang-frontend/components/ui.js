@@ -36,7 +36,7 @@ export function SectionTitle({ char, children, className = '' }) {
 /* ---------------------------------------------------------------- controls */
 
 const BUTTON_BASE =
-  'inline-flex items-center justify-center gap-2 rounded-sm px-5 min-h-11 text-sm font-medium transition-opacity disabled:cursor-not-allowed'
+  'inline-flex shrink-0 items-center justify-center gap-2 whitespace-nowrap rounded-sm px-5 min-h-11 text-sm font-medium transition-opacity disabled:cursor-not-allowed'
 
 export function Button({ variant = 'primary', className = '', children, ...rest }) {
   const styles = {
