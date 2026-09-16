@@ -145,6 +145,49 @@ export default function LeaguePage() {
               <Stat char="季" label={t('Playoffs', '季后赛')} value={t(`Week ${L.playoffWeekStart}`, `第 ${L.playoffWeekStart} 周`)} sub={t(`${L.playoffTeams} teams`, `${L.playoffTeams} 队`)} />
             </div>
 
+            {L.scoringAudit && (
+              <div className="mt-3 text-xs text-ink-500 dark:text-ink-400">
+                <span>
+                  {t(
+                    `All ${L.scoringAudit.totalRules} of your league's scoring rules are applied to every projection`,
+                    `联盟全部 ${L.scoringAudit.totalRules} 条计分规则均已计入每份预测`,
+                  )}
+                  {L.scoringAudit.unscoredCount === 0 ? '.' : ''}
+                </span>
+                {L.scoringAudit.unscoredCount > 0 && (
+                  <details className="mt-1 inline-block w-full">
+                    <summary className="cursor-pointer text-cinnabar-700 dark:text-cinnabar-400">
+                      {t(
+                        `— except ${L.scoringAudit.unscoredCount} that cannot be forecast`,
+                        `— 但有 ${L.scoringAudit.unscoredCount} 条无法预测`,
+                      )}
+                    </summary>
+                    <ul className="mt-1 space-y-0.5">
+                      {L.scoringAudit.unscored.map((u) => (
+                        <li key={u.key} className="nums">
+                          <code>{u.key}</code> ({u.weight > 0 ? '+' : ''}{u.weight})
+                        </li>
+                      ))}
+                    </ul>
+                    <p className="mt-1">
+                      {t(
+                        'These are rare special-teams and turnover-return events that Sleeper publishes no projection for, so they are counted as zero rather than guessed at.',
+                        '这些是 Sleeper 不提供预测的罕见特勤组与回攻事件，因此按零计算，而非臆测。',
+                      )}
+                    </p>
+                  </details>
+                )}
+                {L.bonusCalibration && (
+                  <p className="mt-1">
+                    {t(
+                      `Milestone bonuses and defence tiers are expected values measured from ${L.bonusCalibration.sampleSize.toLocaleString()} player-weeks (${L.bonusCalibration.seasons.join(', ')}).`,
+                      `里程碑奖励与防守分段为基于 ${L.bonusCalibration.sampleSize.toLocaleString()} 个球员周（${L.bonusCalibration.seasons.join('、')}）实测的期望值。`,
+                    )}
+                  </p>
+                )}
+              </div>
+            )}
+
             <div className="mt-4 flex gap-1 overflow-x-auto border-b border-paper-300 dark:border-ink-700">
               <Tab active={tab === 'standings'} onClick={() => setTab('standings')}>{t('Standings', '名次')}</Tab>
               <Tab active={tab === 'strength'} onClick={() => setTab('strength')}>{t('Positional strength', '位置强弱')}</Tab>

@@ -7,6 +7,7 @@ import { loadPlayers, getTrending } from './sleeper/players.js';
 import { buildRosTable, DEFAULT_LAST_WEEK } from './sleeper/projections.js';
 import { computeReplacementLevels, playerFlags, activePositions } from '../domain/valuation.js';
 import { rosLeaguePoints, describeScoring } from '../domain/scoring.js';
+import { auditScoring, calibrationInfo } from '../domain/statDerivation.js';
 import { buildTrendTables } from './nfl/usage.js';
 import { byeWeeksByTeam } from './nfl/schedule.js';
 import { weekContext } from './nfl/context.js';
@@ -47,6 +48,15 @@ async function build(leagueId) {
   // projects every player in every week, bye weeks included.
   const byeByTeam = await byeWeeksByTeam(imported.league.season).catch(() => new Map());
 
+  // Which stat keys the projections actually carry, so we can tell the user
+  // which of their scoring rules we still cannot forecast.
+  const projectedKeys = new Set();
+  for (const e of ros.table.values()) {
+    for (const line of Object.values(e.byWeekStats || {})) {
+      for (const k of Object.keys(line || {})) projectedKeys.add(k);
+    }
+  }
+
   const leaguePts = new Map();
   for (const e of ros.table.values()) {
     const { total, byWeek } = rosLeaguePoints(e, scoring);
@@ -84,6 +94,7 @@ async function build(leagueId) {
     trends,
     activePositions: activePositions(imported.league.rosterPositions),
     byeByTeam,
+    scoringAudit: auditScoring(scoring, projectedKeys),
     scoringDescription: describeScoring(scoring),
     builtAt: Date.now(),
   };
@@ -107,6 +118,8 @@ function leagueHeader(ctx) {
     activePositions: ctx.activePositions,
     usesKicker: ctx.activePositions.includes('K'),
     usesDefense: ctx.activePositions.includes('DEF'),
+    scoringAudit: ctx.scoringAudit,
+    bonusCalibration: calibrationInfo(),
     dataFreshness: {
       leagueBuiltAt: new Date(ctx.builtAt).toISOString(),
       trendWeeks: ctx.trends?.weeks ?? [],

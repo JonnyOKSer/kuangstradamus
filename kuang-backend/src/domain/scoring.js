@@ -4,6 +4,8 @@
 // This is exactly how Sleeper scores real games, which means TE-premium,
 // 6-point-pass-TD, yardage-bonus and any other custom league is handled.
 
+import { deriveStats } from './statDerivation.js';
+
 export function scoreStats(stats = {}, scoringSettings = {}) {
   let total = 0;
   for (const [key, weight] of Object.entries(scoringSettings)) {
@@ -21,12 +23,17 @@ export function scoringFormatOf(scoringSettings = {}) {
   return 'std';
 }
 
-/** Rest-of-season league points from a ROS table entry (see projections.buildRosTable). */
+/**
+ * Rest-of-season league points from a ROS table entry (see
+ * projections.buildRosTable). Each weekly line is passed through
+ * deriveStats first, so milestone bonuses and defence tiers that Sleeper
+ * does not project still carry their expected value.
+ */
 export function rosLeaguePoints(entry, scoringSettings) {
   const byWeek = {};
   let total = 0;
   for (const [week, stats] of Object.entries(entry.byWeekStats || {})) {
-    const pts = scoreStats(stats, scoringSettings);
+    const pts = scoreStats(deriveStats(stats, entry.position), scoringSettings);
     byWeek[week] = Number(pts.toFixed(2));
     total += pts;
   }
