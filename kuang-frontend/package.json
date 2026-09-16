@@ -5,7 +5,9 @@
     "dev": "next dev",
     "build": "next build",
     "export": "next export",
-    "start": "next start"
+    "start": "next start",
+    "check": "node scripts/check-jsx-refs.mjs",
+    "prebuild": "node scripts/check-jsx-refs.mjs"
   },
   "dependencies": {
     "@tailwindcss/postcss": "^4.1.11",

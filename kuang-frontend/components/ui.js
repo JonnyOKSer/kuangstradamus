@@ -38,13 +38,13 @@ export function SectionTitle({ char, children, className = '' }) {
 const BUTTON_BASE =
   'inline-flex shrink-0 items-center justify-center gap-2 whitespace-nowrap rounded-sm px-5 min-h-11 text-sm font-medium transition-opacity disabled:cursor-not-allowed'
 
-export function Button({ variant = 'primary', className = '', children, ...rest }) {
+export function Button({ variant = 'primary', type = 'button', className = '', children, ...rest }) {
   const styles = {
     primary: 'bg-cinnabar-600 text-paper-50 hover:opacity-90 shadow-sm disabled:bg-paper-200 disabled:text-ink-400 disabled:shadow-none dark:disabled:bg-ink-800 dark:disabled:text-ink-500',
     quiet: 'border border-paper-300 dark:border-ink-700 hover:bg-paper-200/60 dark:hover:bg-ink-800 disabled:opacity-40',
     ghost: 'text-ink-500 dark:text-ink-300 hover:text-ink-900 dark:hover:text-paper-100 px-2 disabled:opacity-40',
   }[variant]
-  return <button className={`${BUTTON_BASE} ${styles} ${className}`} {...rest}>{children}</button>
+  return <button type={type} className={`${BUTTON_BASE} ${styles} ${className}`} {...rest}>{children}</button>
 }
 
 export function Field({ className = '', ...rest }) {

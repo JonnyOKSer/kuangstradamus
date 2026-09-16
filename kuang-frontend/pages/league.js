@@ -426,12 +426,16 @@ function TeamView({ team, positions }) {
                       {t('Drop', '释出')} <b>{d.name}</b>
                       <span className="text-ink-500 dark:text-ink-400"> ({d.position}, {fmt(d.ros)} {t('ROS', '剩余分')})</span>
                     </span>
-                    <span className="text-ink-400">→</span>
-                    <span>
-                      {t('add', '签下')} <b>{d.replacedBy.name}</b>
-                      <span className="text-ink-500 dark:text-ink-400"> ({fmt(d.replacedBy.ros)} {t('ROS', '剩余分')})</span>
-                      <span className="ml-1 nums text-jade-700 dark:text-jade-400">+{fmt(d.replacedBy.gain)}</span>
-                    </span>
+                    {d.replacedBy && (
+                      <>
+                        <span className="text-ink-400">→</span>
+                        <span>
+                          {t('add', '签下')} <b>{d.replacedBy.name}</b>
+                          <span className="text-ink-500 dark:text-ink-400"> ({fmt(d.replacedBy.ros)} {t('ROS', '剩余分')})</span>
+                          <span className="ml-1 nums text-jade-700 dark:text-jade-400">+{fmt(d.replacedBy.gain)}</span>
+                        </span>
+                      </>
+                    )}
                   </li>
                 ))}
               </ul>
@@ -633,6 +637,30 @@ function LineupCard({ lineup, autoSet }) {
 }
 
 /* -------------------------------------------------------------- sleepers */
+
+/* ------------------------------------------------------------------ faab */
+
+function Faab({ est }) {
+  const { t } = useUI()
+  if (!est || est.low == null) return <span className="text-ink-400">—</span>
+  return (
+    <span
+      className="nums whitespace-nowrap"
+      title={t(
+        `Median $${est.median} · ${est.pctOfBudget}% of budget · from ${est.sampleSize} winning bids this season`,
+        `中位 $${est.median} · 预算的 ${est.pctOfBudget}% · 依据本季 ${est.sampleSize} 次成交出价`,
+      )}
+    >
+      ${est.low}{est.low !== est.high && <>–${est.high}</>}
+      {est.cappedByBudget && (
+        <span
+          className="ml-0.5 text-cinnabar-600 dark:text-cinnabar-400"
+          title={t('capped by your remaining budget', '受你的剩余预算限制')}
+        >*</span>
+      )}
+    </span>
+  )
+}
 
 function SleeperCard({ sleepers }) {
   const { t } = useUI()
