@@ -1,13 +1,23 @@
 // Challenger gates: the checks a projection must survive before it is allowed
 // to drive a start/sit recommendation.
 //
-// A raw Sleeper projection knows nothing about whether a back just lost his
-// job, whether the defence opposite him has been shredded for five weeks, or
-// whether the game is being played in a 22°F snowstorm. Each gate below looks
-// at one of those questions, returns a bounded multiplier and says why. The
-// product of the gates (clamped, so no single signal can run away with the
-// lineup) is the adjusted projection, and the gates that could not be
-// evaluated lower the confidence rather than silently passing.
+// Each gate asks one question, returns a bounded multiplier and says why.
+// Whether that multiplier is allowed to move the projection is a separate
+// decision, held in GATE_WEIGHT below and settled by measurement rather than
+// taste — see scripts/backtest-gates.js.
+//
+// What the backtest found, over ~3,000 player-weeks in each of 2024 and 2025:
+// the projection Sleeper publishes already prices in recent form, snap share
+// and matchup, because it is rebuilt every week. Applying those a second time
+// double-counts, and the first version of this file made projections about 4%
+// WORSE than leaving them alone. Weather is the exception — projections seem
+// to publish before the forecast firms up, and bad-weather games came in 10-15%
+// under projection in both seasons.
+//
+// So form, role and game script are now computed and shown but not applied:
+// a falling snap share is worth telling someone about, and is still not
+// evidence that this week's projection is too high. Matchup survives at a
+// quarter strength; weather is applied ~40% harder than it was.
 //
 // Nothing here invents data: a gate with no input returns factor 1 and
 // reports itself as 'unknown'.
@@ -17,6 +27,25 @@ const r3 = (x) => Number((x ?? 0).toFixed(3));
 const r2 = (x) => Number((x ?? 0).toFixed(2));
 
 export const BLOCKING_STATUSES = new Set(['Out', 'IR', 'PUP', 'Sus', 'COV', 'NA', 'DNR']);
+
+/**
+ * How hard each gate is allowed to pull, as an exponent on its own factor.
+ * Fitted in scripts/backtest-gates.js against 2024 and 2025 actuals:
+ *   0   the signal did not survive measurement — shown, never applied
+ *   1   scaled about right
+ *  >1   real and previously under-applied
+ * Availability is 1 by definition: a bye or an Out is a fact, not a forecast.
+ */
+export const GATE_WEIGHT = {
+  availability: 1,
+  weather: 1.4,     // fitted α 1.35 (2024) / 1.45 (2025)
+  matchup: 0.25,    // fitted α 0.05 (2024) / 0.30 (2025) — weak but correctly signed
+  role: 0,          // fitted α 0.05 / -0.35 — flips sign between seasons
+  form: 0,          // fitted α 0.20 / -0.10 — recent form is already in the projection
+  gameScript: 0,    // fitted α 0.30 / 0.35 but non-monotonic both years
+};
+
+export const isApplied = (name) => (GATE_WEIGHT[name] ?? 0) > 0;
 export const TOTAL_FACTOR_FLOOR = 0.6;
 export const TOTAL_FACTOR_CEIL = 1.4;
 
@@ -215,7 +244,7 @@ export function runGates({ position, projectedPoints, injuryStatus, onBye, form,
       factor: 0,
       confidence: 1,
       blocked: true,
-      gates: [availability],
+      gates: [{ ...availability, weight: 1, applied: true, effect: 0 }],
       reasons: [availability.note],
     };
   }
@@ -229,20 +258,26 @@ export function runGates({ position, projectedPoints, injuryStatus, onBye, form,
     gameScriptGate({ teamOffense, teamOffenseAvg, isHome, opponent }),
   ];
 
-  const raw = gates.reduce((f, g) => f * g.factor, 1);
+  // Each gate contributes factor^weight, so an unweighted gate is inert.
+  for (const g of gates) {
+    g.weight = GATE_WEIGHT[g.name] ?? 0;
+    g.applied = g.weight > 0;
+    g.effect = g.applied && g.factor > 0 ? r3(g.factor ** g.weight) : 1;
+  }
+  const raw = gates.reduce((f, g) => f * g.effect, 1);
   const factor = clamp(raw, TOTAL_FACTOR_FLOOR, TOTAL_FACTOR_CEIL);
 
-  // Confidence falls with every gate we could not evaluate and with a
-  // Questionable tag, because an unknown is not the same as a pass.
-  const unknowns = gates.filter((g) => g.verdict === 'unknown').length;
+  // Confidence tracks only the gates that actually move the number: an
+  // unmeasurable signal we never apply is not a reason to doubt the answer.
+  const scored = gates.filter((g) => g.applied);
+  const unknowns = scored.filter((g) => g.verdict === 'unknown').length;
   let confidence = 1 - 0.12 * unknowns;
   if (injuryStatus === 'Questionable') confidence -= 0.15;
   if (injuryStatus === 'Doubtful') confidence -= 0.3;
-  if (form && form.gamesPlayed === 1) confidence -= 0.1;
   confidence = clamp(confidence, 0.2, 1);
 
   const reasons = gates
-    .filter((g) => g.verdict === 'pass' || g.verdict === 'fail')
+    .filter((g) => g.applied && (g.verdict === 'pass' || g.verdict === 'fail'))
     .map((g) => `${g.name}: ${g.note}`);
 
   return {

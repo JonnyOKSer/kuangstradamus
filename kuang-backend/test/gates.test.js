@@ -83,3 +83,41 @@ test('a blocked challenger never enters the lineup', () => {
   });
   assert.equal(r.swap, false);
 });
+
+/* --- weighting, fitted in scripts/backtest-gates.js against 2024 + 2025 --- */
+
+test('signals that did not survive measurement are shown but never applied', () => {
+  const strongForm = {
+    gamesPlayed: 5, recentPPG: 14, last3PPG: 22, priorPPG: 6,
+    snapShareLast: 0.95, snapShareTrend: 0.3, touchesTrend: 6,
+  };
+  const r = runGates({ ...base, form: strongForm, teamOffense: { pointsPerGame: 140, vsAvg: 40 }, teamOffenseAvg: 100 });
+
+  for (const name of ['role', 'form', 'gameScript']) {
+    const g = r.gates.find((x) => x.name === name);
+    assert.equal(g.applied, false, `${name} must not move the projection`);
+    assert.equal(g.effect, 1);
+    assert.ok(g.factor !== 1, `${name} should still compute and report a factor`);
+    assert.ok(g.note, `${name} should still explain itself`);
+  }
+  assert.equal(r.adjusted, 12, 'unweighted signals leave the projection alone');
+});
+
+test('weather is applied harder than raw, matchup much softer', () => {
+  const weather = { tempF: 20, windMph: 30, precipIn: 0, snowIn: 0.4, summary: 'cold and windy' };
+  const w = runGates({ ...base, weather });
+  const wg = w.gates.find((g) => g.name === 'weather');
+  assert.ok(wg.effect < wg.factor, 'a weather penalty should be amplified, not damped');
+
+  const m = runGates({ ...base, defense: { pointsAllowedPerGame: 30, vsAvg: 10, gamesSampled: 5, rank: 1, of: 32 }, leagueAvg: 20 });
+  const mg = m.gates.find((g) => g.name === 'matchup');
+  assert.ok(mg.effect < mg.factor, 'a matchup boost should be damped toward 1');
+  assert.ok(mg.effect > 1, 'but still point the same way');
+});
+
+test('confidence ignores gates that never move the number', () => {
+  // no form and no team data: role/form/gameScript are all unknown, but none
+  // of them are applied, so they must not make the answer look uncertain.
+  const r = runGates({ ...base, defense: { pointsAllowedPerGame: 20, vsAvg: 0, gamesSampled: 4, rank: 16, of: 32 }, leagueAvg: 20, sheltered: true });
+  assert.equal(r.confidence, 1);
+});
