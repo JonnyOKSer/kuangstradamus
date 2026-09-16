@@ -123,6 +123,21 @@ export function createResolver(list) {
     threshold: 0.4,
     ignoreLocation: true,
   });
+  // A deliberately looser index used only to answer "did you mean ...?" after a
+  // miss. It never resolves a name on its own.
+  const loose = new Fuse(pool, {
+    keys: [{ name: 'name', weight: 0.6 }, { name: 'lastName', weight: 0.4 }],
+    includeScore: true,
+    threshold: 0.7,
+    ignoreLocation: true,
+  });
+  const byLastName = new Map();
+  for (const p of pool) {
+    const key = normalize(p.lastName || '');
+    if (!key) continue;
+    if (!byLastName.has(key)) byLastName.set(key, []);
+    byLastName.get(key).push(p);
+  }
 
   const rank = (arr, hints) => {
     const scored = arr.map((p) => {
@@ -144,6 +159,33 @@ export function createResolver(list) {
       if (aliases.includes(t)) return defByTeam.get(abbr) || null;
     }
     return null;
+  }
+
+  /**
+   * Close-but-not-confident candidates, used to turn a dead end into
+   * "did you mean ...?". Surname hits come first because the most common real
+   * miss is a right surname with the wrong or outdated first name.
+   */
+  function nearMatches(query, hints = {}, limit = 4) {
+    const tokens = query.split(' ').filter(Boolean);
+    const norm = normalize(query);
+    const seen = new Set();
+    const out = [];
+    const push = (p, why) => {
+      if (!p || seen.has(p.id) || out.length >= limit) return;
+      seen.add(p.id);
+      out.push({ id: p.id, name: p.name, position: p.position, team: p.team, why });
+    };
+
+    if (tokens.length >= 2) {
+      for (const p of rank(byLastName.get(normalize(tokens[tokens.length - 1])) || [], hints)) push(p, 'same surname');
+    }
+    if (tokens.length === 1 && norm) {
+      for (const p of rank(byLastName.get(norm) || [], hints)) push(p, 'same surname');
+    }
+    for (const p of pool.filter((x) => norm && x.searchName.includes(norm)).sort((a, b) => a.searchRank - b.searchRank)) push(p, 'name contains your text');
+    for (const r of loose.search(query, { limit: limit * 2 })) push(r.item, 'similar spelling');
+    return out;
   }
 
   return function resolve(rawQuery, hints = {}) {
@@ -201,7 +243,12 @@ export function createResolver(list) {
         };
       }
     }
-    return null;
+
+    // 5. no confident match. Offer candidates rather than a dead end — a wrong
+    // first name on a real surname ("david boston") is the common case, and
+    // guessing a different player would be worse than asking.
+    const suggestions = nearMatches(aliased, hints);
+    return suggestions.length ? { player: null, confidence: 0, method: 'miss', suggestions } : null;
   };
 }
 
@@ -224,6 +271,11 @@ export async function loadPlayers() {
     setTimeout(() => { indexPromise = null; }, TTL.players).unref?.();
   }
   return indexPromise;
+}
+
+/** Force the next loadPlayers() to re-fetch the dump. */
+export function invalidatePlayers() {
+  indexPromise = null;
 }
 
 export async function getPlayer(id) {

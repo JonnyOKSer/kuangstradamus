@@ -23,6 +23,14 @@ export default function Home() {
   const [loading, setLoading] = useState(false)
 
   const t = (en, zh) => (lang === 'zh' ? zh : en)
+
+  const startOver = () => {
+    setMessages([])
+    setAnalysis(null)
+    setShowTable(false)
+    setInput('')
+  }
+  const hasSession = messages.length > 0 || !!analysis
   const toggleLang = () => setLang(lang === 'en' ? 'zh' : 'en')
   const toggleDark = () => setDark(!dark)
 
@@ -166,14 +174,24 @@ export default function Home() {
         </div>
       )}
 
-      {analysis && !showTable && (
-        <button
-          onClick={() => setShowTable(true)}
-          className="mb-4 px-4 py-2 rounded bg-indigo-500 text-white dark:bg-indigo-300 dark:text-black shadow hover:opacity-90 transition-all"
-        >
-          🎴 {t('Enter the Tenth Quatrain', '进入第十诗节')}
-        </button>
-      )}
+      <div className="flex flex-wrap gap-2 justify-center mb-4">
+        {analysis && !showTable && (
+          <button
+            onClick={() => setShowTable(true)}
+            className="px-4 py-2 rounded bg-indigo-500 text-white dark:bg-indigo-300 dark:text-black shadow hover:opacity-90 transition-all"
+          >
+            🎴 {t('Enter the Tenth Quatrain', '进入第十诗节')}
+          </button>
+        )}
+        {hasSession && (
+          <button
+            onClick={startOver}
+            className="px-4 py-2 rounded border border-gray-400 dark:border-gray-600 shadow-sm hover:opacity-80 transition-all"
+          >
+            ↺ {t('Ok, start over', '好的，重新开始')}
+          </button>
+        )}
+      </div>
 
       {showTable && renderTable()}
 

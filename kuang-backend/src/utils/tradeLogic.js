@@ -81,8 +81,8 @@ export async function analyzeTrade(body, options = {}) {
       return { type: 'pick', name: item.name, position: 'PICK', team: null, points: 0, value: v, vorp: v, flags: [] };
     }
     const match = resolve(item.name);
-    if (!match) {
-      unmatched.push({ side: label, name: item.name });
+    if (!match?.player) {
+      unmatched.push({ side: label, name: item.name, suggestions: match?.suggestions || [] });
       return null;
     }
     const p = match.player;
@@ -121,7 +121,15 @@ export async function analyzeTrade(body, options = {}) {
   const totalB = sum(sideB, 'points');
   const valueA = sum(sideA, 'value');
   const valueB = sum(sideB, 'value');
-  const { category, winner, marginPct } = classifyTrade(valueA, valueB);
+
+  // VORP floors at zero, so two sides of bench-level players both come out at
+  // 0 and would read as "even" however far apart their projections are. When
+  // neither side clears replacement, judge on raw projected points instead.
+  const belowReplacement = valueA <= 0 && valueB <= 0;
+  const { category, winner, marginPct } = classifyTrade(
+    belowReplacement ? totalA : valueA,
+    belowReplacement ? totalB : valueB,
+  );
 
   const names = (arr) => arr.map((p) => p.name).join(' + ') || '—';
   const label = { A: 'Side A', B: 'Side B' };
@@ -132,9 +140,16 @@ export async function analyzeTrade(body, options = {}) {
   let summaryZh;
   if (incomplete) {
     const missing = unmatched.map((u) => `"${u.name}"`).join(', ');
+    const hints = unmatched
+      .filter((u) => u.suggestions?.length)
+      .map((u) => `"${u.name}" → ${u.suggestions.slice(0, 3).map((s) => `${s.name} (${s.position}${s.team ? `, ${s.team}` : ''})`).join(', ')}`);
     verdict = 'Incomplete — unknown player(s)';
-    summary = `I could not find ${missing} on any NFL roster. Check the spelling (or use the player's full name) and summon again.`;
-    summaryZh = `找不到球员 ${missing}，请检查拼写后重试。`;
+    summary = hints.length
+      ? `I could not find ${missing} on any NFL roster. Did you mean: ${hints.join('; ')}?`
+      : `I could not find ${missing} on any NFL roster. Check the spelling (or use the player's full name) and summon again.`;
+    summaryZh = hints.length
+      ? `找不到球员 ${missing}。您是否想找：${unmatched.filter((u) => u.suggestions?.length).map((u) => u.suggestions.slice(0, 3).map((s) => s.name).join('、')).join('；')}？`
+      : `找不到球员 ${missing}，请检查拼写后重试。`;
   } else {
     const winLabel = winner ? label[winner] : null;
     const verdictText = {
@@ -144,9 +159,13 @@ export async function analyzeTrade(body, options = {}) {
       lopsided: `${winLabel} fleeces the other side 🏆`,
     }[category];
     verdict = verdictText;
-    const detail = winner
-      ? ` ${winLabel} carries ${marginPct}% more value over replacement, so whoever receives ${winLabel} gets the better end.`
-      : ' The value gap is inside the noise of the projections.';
+    const detail = belowReplacement
+      ? (winner
+        ? ` Neither side clears replacement level, so this is judged on raw projected points: ${winLabel} has ${marginPct}% more.`
+        : ' Neither side clears replacement level, and their projected points are near identical.')
+      : winner
+        ? ` ${winLabel} carries ${marginPct}% more value over replacement, so whoever receives ${winLabel} gets the better end.`
+        : ' The value gap is inside the noise of the projections.';
     summary = `Side A (${names(sideA)}): ${valueA} value / ${totalA} ROS pts vs Side B (${names(sideB)}): ${valueB} value / ${totalB} ROS pts. Verdict: ${verdict}.${detail}`;
     const zhVerdict = { even: '势均力敌', slight: `${winner === 'A' ? 'A方' : 'B方'}略占上风`, clear: `${winner === 'A' ? 'A方' : 'B方'}明显获胜`, lopsided: `${winner === 'A' ? 'A方' : 'B方'}大获全胜` }[category];
     summaryZh = `A方（${names(sideA)}）价值 ${valueA}，剩余赛季预计 ${totalA} 分；B方（${names(sideB)}）价值 ${valueB}，剩余赛季预计 ${totalB} 分。判定：${zhVerdict}。`;
