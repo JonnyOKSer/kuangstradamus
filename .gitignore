@@ -6,3 +6,8 @@ dist
 build
 out
 .DS_Store
+
+# recorded demo videos (re-create with kuang-frontend/scripts/demo-video.py)
+docs/demo/*.webm
+docs/demo/*.mp4
+docs/demo/_raw/
