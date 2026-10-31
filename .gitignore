@@ -11,3 +11,5 @@ out
 docs/demo/*.webm
 docs/demo/*.mp4
 docs/demo/_raw/
+docs/demo/voice/
+docs/demo/*-cues.json

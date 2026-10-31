@@ -1,29 +1,40 @@
 """
 Record a narrated product demo of Kuangstradamus with Playwright.
 
-    python3 scripts/demo-video.py [--base http://127.0.0.1:3000] [--league ID] [--team "Team name"] [--out docs/demo]
+    python3 scripts/demo-video.py [--mobile] [--base http://127.0.0.1:3000] [--league ID] [--team "Team name"] [--out docs/demo]
 
 Runs against a local static export (served on :3000) and a local backend with
 the access gate off, so the recording never needs an access code. Injects a
-visible cursor and a caption bar into every page, drives the real UI with
-human pacing, and writes a .webm (plus .mp4 when an H.264 encoder exists).
+visible cursor and a caption bar into every page and drives the real UI with
+human pacing.
+
+Narration comes from demo-narration.json. If demo-voice.py has produced
+docs/demo/voice/manifest.json, every scene is paced to its spoken line and the
+clips are mixed into <stem>-voiced.mp4 at the moments they were cued; without
+it, the captions hold for a reading-time estimate and the video stays silent.
 """
 import argparse
-import os
+import json
+import re
 import shutil
 import subprocess
 import sys
 import time
+import urllib.request
 from pathlib import Path
 
 from playwright.sync_api import sync_playwright
 
 ap = argparse.ArgumentParser()
-ap.add_argument("--base", default="http://127.0.0.1:3000")
+ap.add_argument("--base", default="http://127.0.0.1:3001")
+ap.add_argument("--api", default="http://127.0.0.1:3100", help="backend, used to pick a roster name when a trade target has no offer")
 ap.add_argument("--league", default="1389709416873353216")
 ap.add_argument("--team", default="Rebuild Year 3?")
 ap.add_argument("--out", default="docs/demo")
-ap.add_argument("--api", default="http://127.0.0.1:3100", help="backend used to look up a roster name when a trade target has no offer")
+ap.add_argument("--narration", default=str(Path(__file__).with_name("demo-narration.json")))
+ap.add_argument("--voice-dir", help="defaults to <out>/voice")
+ap.add_argument("--no-audio", action="store_true", help="ignore any generated voice clips")
+ap.add_argument("--audio-offset", type=float, default=0.0, help="seconds to shift all narration (positive = later)")
 ap.add_argument("--mobile", action="store_true", help="record the phone cut instead of desktop")
 args = ap.parse_args()
 
@@ -32,6 +43,13 @@ OUT.mkdir(parents=True, exist_ok=True)
 B = args.base.rstrip("/")
 L = args.league
 TRADE = "Christian McCaffrey for Bijan Robinson and Jake Ferguson"
+BEATS = {b["id"]: b for b in json.load(open(args.narration))}
+VOICE_DIR = Path(args.voice_dir) if args.voice_dir else OUT / "voice"
+MANIFEST = {}
+if not args.no_audio and (VOICE_DIR / "manifest.json").exists():
+    MANIFEST = json.load(open(VOICE_DIR / "manifest.json"))
+FFMPEG = shutil.which("ffmpeg") or next(iter(sorted((Path.home() / "Library/Caches/ms-playwright").glob("ffmpeg-*/ffmpeg-*"))), None)
+FFPROBE = shutil.which("ffprobe")
 
 # Cursor + caption overlay, installed on every document before any script runs.
 OVERLAY = r"""
@@ -80,11 +98,11 @@ OVERLAY = r"""
     cap.classList.remove('on');
     setTimeout(() => { cap.innerHTML = (han ? `<span class="han">${han}</span>` : '') + text; cap.classList.add('on'); }, text ? 220 : 0);
   };
-  window.__title = (on) => {
+  window.__title = (on, seal, sub, cn) => {
     let t = document.getElementById('kd-title');
     if (on) {
       if (!t) { t = document.createElement('div'); t.id = 'kd-title';
-        t.innerHTML = '<div class="seal">谕</div><h1>Kuangstradamus</h1><p>The oracle of fantasy football · a trade verdict and your week, read first</p><div class="cn">诺查丹玛斯 · 梦幻橄榄球神谕</div>';
+        t.innerHTML = `<div class="seal">${seal || '谕'}</div><h1>Kuangstradamus</h1><p>${sub || 'The oracle of fantasy football · a trade verdict and your week, read first'}</p><div class="cn">${cn || '诺查丹玛斯 · 梦幻橄榄球神谕'}</div>`;
         document.body.appendChild(t); }
       t.classList.remove('off');
     } else if (t) { t.classList.add('off'); setTimeout(() => t.remove(), 700); }
@@ -92,11 +110,13 @@ OVERLAY = r"""
 })();
 """
 
+MOBILE_CSS = """document.addEventListener('DOMContentLoaded', () => { const s = document.createElement('style');
+  s.textContent = '#kd-cap{font-size:14.5px;line-height:1.3;padding:8px 12px;bottom:14px;max-width:88vw;border-radius:10px}#kd-title h1{font-size:38px}#kd-title p{font-size:14px;padding:0 24px;text-align:center}#kd-title .seal{width:56px;height:56px;font-size:30px}';
+  document.head.appendChild(s); });"""
+
 
 def roster_name(league_id, roster_id, index=3):
     """A mid-value player from the team, for when a trade target comes with no offer idea."""
-    import json
-    import urllib.request
     try:
         with urllib.request.urlopen(f"{args.api}/api/league/{league_id}/team/{roster_id}", timeout=60) as r:
             roster = json.load(r).get("roster", [])
@@ -108,10 +128,268 @@ def roster_name(league_id, roster_id, index=3):
 
 
 def wait_verdict(pg, label):
-    """A verdict seal, or the oracle's error note — whichever comes first."""
+    """A verdict seal, or the oracle's error note, whichever comes first."""
     pg.wait_for_selector(".stamp, [class*='border-neon/60']", timeout=90000)
     if pg.locator(".stamp").count() == 0:
         print(f"[{label}] oracle returned an error instead of a verdict:", pg.locator("[class*='border-neon/60']").first.inner_text()[:200])
+
+
+class Demo:
+    """Pacing, cursor and narration cues for one recording."""
+
+    def __init__(self, pg, mobile):
+        self.pg = pg
+        self.mobile = mobile
+        self.cues = []
+        self.t0 = time.monotonic()
+        self.audio_end = 0.0
+
+    def now(self):
+        return time.monotonic() - self.t0
+
+    def wait_until(self, t):
+        d = t - self.now()
+        if d > 0:
+            self.pg.wait_for_timeout(int(d * 1000))
+
+    def pause(self, ms):
+        self.pg.wait_for_timeout(ms)
+
+    def clip_length(self, bid):
+        m = MANIFEST.get(bid)
+        if m:
+            return m["duration"]
+        return max(2.2, len(BEATS[bid]["speech"]) / 15.5)  # reading-time estimate when silent
+
+    def beat(self, bid, block=True, extra=0.35, gap=0.4):
+        """Show the caption and start the spoken line. Never overlaps the previous line."""
+        b = BEATS[bid]
+        self.wait_until(self.audio_end + gap)
+        self.pg.evaluate("([t, h]) => window.__cap(t, h)", [b["caption"], b.get("han")])
+        t = self.now()
+        dur = self.clip_length(bid)
+        self.cues.append({"id": bid, "at": round(t, 3), "duration": round(dur, 3)})
+        self.audio_end = t + dur
+        if block:
+            self.wait_until(self.audio_end + extra)
+
+    def wait_audio(self, extra=0.35):
+        self.wait_until(self.audio_end + extra)
+
+    def move_to(self, locator, steps=28):
+        box = locator.bounding_box()
+        if not box:
+            return
+        self.pg.mouse.move(box["x"] + box["width"] / 2, box["y"] + min(box["height"] / 2, 22), steps=steps)
+
+    def click(self, locator, settle=600):
+        locator.scroll_into_view_if_needed()
+        self.pause(250)
+        self.move_to(locator)
+        self.pause(180)
+        locator.click()
+        self.pause(settle)
+
+    def scroll(self, to, duration=900):
+        self.pg.evaluate("y => window.scrollTo({ top: y, behavior: 'smooth' })", to)
+        self.pause(duration)
+
+    def scroll_to(self, selector, offset=120, duration=900):
+        y = self.pg.evaluate("([s, o]) => document.querySelector(s).getBoundingClientRect().top + window.scrollY - o", [selector, offset])
+        self.scroll(y, duration)
+
+
+def run_scenes(d):
+    pg, mobile = d.pg, d.mobile
+
+    # ---- Scene 1: title + the Oracle
+    pg.goto(f"{B}/", wait_until="networkidle")
+    pg.evaluate("window.__title(true)")
+    pg.mouse.move(195 if mobile else 720, 500)
+    d.pause(500)
+    d.beat("title")
+    d.pause(300)
+    pg.evaluate("window.__title(false)")
+    d.pause(800)
+
+    d.beat("ask", block=False)
+    ta = pg.locator("textarea")
+    d.click(ta, 200)
+    ta.press_sequentially(TRADE, delay=38)
+    d.wait_audio()
+
+    d.beat("feed", block=False)
+    d.pause(700)
+    d.click(pg.locator("button[type=submit]"), 300)
+    wait_verdict(pg, "scene 1")
+    d.wait_audio()
+    d.pause(300)
+    d.beat("verdict")
+
+    d.click(pg.get_by_role("button", name="Open the slip"), 500)
+    d.beat("slip", block=False)
+    d.scroll(900 if mobile else 420, 900)
+    d.wait_audio()
+    d.pause(400)
+
+    # ---- Scene 2: the Almanac
+    d.beat("almanac", block=False)
+    d.click(pg.get_by_role("link", name="Almanac").locator("visible=true").first, 900)
+    field = pg.locator("input[placeholder*='Sleeper']")
+    d.click(field, 200)
+    field.press_sequentially(L, delay=22)
+    d.pause(300)
+    d.click(pg.locator("form button[type=submit]").first, 500)
+    pg.wait_for_selector("text=League pulse", timeout=60000)
+    d.wait_audio()
+    d.pause(400)
+
+    d.beat("standings", block=False)
+    d.scroll(900 if mobile else 520, 1000)
+    d.wait_audio()
+    d.pause(300)
+
+    d.beat("strength", block=False)
+    d.scroll(2300 if mobile else 1150, 1100)
+    cells = pg.locator("span[title*='vs league average']")
+    if cells.count() > 10:
+        for i in (1, 2, 3, 9, 10):
+            d.move_to(cells.nth(i), steps=14)
+            d.pause(230)
+    d.wait_audio()
+    d.pause(400)
+
+    d.beat("mark", block=False)
+    d.scroll(700 if mobile else 300, 800)
+    row = pg.locator("li", has_text=args.team).first
+    d.click(row.get_by_role("button", name="mine"), 400)
+
+    # ---- Scene 3: the day page
+    pg.wait_for_selector("text=Today's reading", timeout=60000)
+    d.wait_audio()
+    d.pause(300)
+    d.beat("daypage", block=False)
+    d.scroll(0, 500)
+    d.pause(1400)
+    ribbon = pg.locator("[role=list][aria-label='Season weeks'] [role=listitem]")
+    if ribbon.count() >= 10:
+        d.click(ribbon.nth(9), 400)
+    d.wait_audio()
+    d.pause(300)
+    if ribbon.count() >= 10:
+        d.click(ribbon.nth(9), 300)
+
+    d.beat("readings", block=False)
+    first = pg.locator("button:has(span.han:text('签'))").first
+    d.move_to(first, steps=20)
+    d.wait_audio()
+    d.pause(300)
+
+    d.beat("slips", block=False)
+    d.click(pg.locator("button[aria-controls='slip-waivers']"), 900)
+    d.scroll_to("#slip-waivers", 120, 900)
+    d.wait_audio()
+    d.pause(500)
+
+    d.beat("sheet", block=False)
+    chip = pg.locator("#slip-waivers button").filter(has_text="·").first
+    d.click(chip, 1200)
+    sheet = pg.get_by_role("dialog")
+    try:
+        sheet.locator("[class*='overflow-y-auto']").first.evaluate("el => el.scrollTo({ top: 420, behavior: 'smooth' })")
+    except Exception:
+        pass
+    d.wait_audio()
+    d.pause(500)
+    d.click(sheet.get_by_role("button", name="Close").last, 700)
+
+    d.beat("trades", block=False)
+    d.click(pg.locator("button[aria-controls='slip-trades']"), 900)
+    d.scroll_to("#slip-trades", 120, 900)
+    rid = (re.search(r"[?&]t=(\d+)", pg.url) or [None, None])[1]
+    with_offer = pg.locator("#slip-trades li", has_text="offer:")
+    card = with_offer.first if with_offer.count() else pg.locator("#slip-trades li").first
+    d.wait_audio()
+    d.pause(300)
+    d.click(card.locator("a", has_text="Ask the Oracle"), 1500)
+
+    # ---- Scene 4: back in the Oracle, league-scored
+    if "give=" not in pg.url:
+        give = roster_name(L, rid) or "Rashee Rice"
+        d.beat("offer", block=False)
+        ta2 = pg.locator("textarea")
+        d.click(ta2, 200)
+        ta2.press("Home")
+        ta2.press_sequentially(f"{give} ", delay=40)
+        d.pause(400)
+        d.click(pg.locator("button[type=submit]"), 300)
+    wait_verdict(pg, "scene 4")
+    d.wait_audio()
+    d.pause(300)
+    d.beat("scored")
+
+    # ---- Scene 5: season ledger
+    d.beat("season", block=False)
+    pg.goto(f"{B}/league.html?l={L}&view=season", wait_until="networkidle")
+    pg.wait_for_selector("text=Playoff odds", timeout=60000)
+    d.pause(900)
+    d.scroll(900 if mobile else 560, 1200)
+    d.pause(1200)
+    d.scroll(1900 if mobile else 1150, 1200)
+    d.wait_audio()
+    d.pause(400)
+
+    # ---- End card
+    pg.evaluate("window.__title(true, '签', 'kuangstradamus.xyz · free Sleeper data · your week, read first', '神谕读的是概率，不是定数')")
+    d.beat("end")
+    d.pause(900)
+
+
+def mux(silent_mp4, cues, lead, stem):
+    """Place every narration clip at its cue time over the silent video."""
+    clips = [(c, VOICE_DIR / MANIFEST[c["id"]]["file"]) for c in cues if c["id"] in MANIFEST]
+    if not clips:
+        return None
+    cmd = [str(FFMPEG), "-y", "-loglevel", "error", "-i", str(silent_mp4)]
+    parts = []
+    for i, (c, path) in enumerate(clips):
+        cmd += ["-i", str(path)]
+        delay_ms = max(0, int(round((c["at"] + lead + args.audio_offset) * 1000)))
+        parts.append(f"[{i + 1}:a]aformat=sample_rates=44100:channel_layouts=stereo,adelay={delay_ms}:all=1[a{i}]")
+    mix = "".join(f"[a{i}]" for i in range(len(clips))) + f"amix=inputs={len(clips)}:normalize=0:duration=longest[a]"
+    out = OUT / f"{stem}-voiced.mp4"
+    cmd += ["-filter_complex", ";".join(parts + [mix]), "-map", "0:v", "-map", "[a]", "-c:v", "copy", "-c:a", "aac", "-b:a", "160k", "-movflags", "+faststart", str(out)]
+    r = subprocess.run(cmd, capture_output=True, text=True)
+    if r.returncode != 0:
+        print("mux failed:", r.stderr[:500])
+        return None
+    return out
+
+
+def finish(raw, mobile, cues, t_close):
+    stem = "kuangstradamus-demo-mobile" if mobile else "kuangstradamus-demo"
+    webm = OUT / f"{stem}.webm"
+    shutil.move(raw, webm)
+    shutil.rmtree(OUT / "_raw", ignore_errors=True)
+    json.dump({"cues": cues, "t_close": round(t_close, 3)}, open(OUT / f"{stem}-cues.json", "w"), indent=2)
+    print("webm:", webm, f"({webm.stat().st_size // 1024} KB)")
+    if not FFMPEG:
+        print("no ffmpeg found; stopping at the .webm")
+        return
+    mp4 = OUT / f"{stem}.mp4"
+    r = subprocess.run([str(FFMPEG), "-y", "-loglevel", "error", "-i", str(webm), "-c:v", "libx264", "-pix_fmt", "yuv420p", "-crf", "20", "-movflags", "+faststart", str(mp4)])
+    if r.returncode != 0 or not mp4.exists():
+        print("mp4 conversion unavailable (no H.264 encoder); the .webm plays in Chrome, Slack and Discord.")
+        return
+    print("mp4: ", mp4, f"({mp4.stat().st_size // 1024} KB)")
+    if MANIFEST and FFPROBE:
+        vid = float(subprocess.run([FFPROBE, "-v", "error", "-show_entries", "format=duration", "-of", "csv=p=0", str(mp4)], capture_output=True, text=True).stdout.strip() or 0)
+        lead = max(0.0, vid - t_close)  # the recording starts a little before the clock did
+        voiced = mux(mp4, cues, lead, stem)
+        if voiced:
+            print("voiced:", voiced, f"({voiced.stat().st_size // 1024} KB) · {len(cues)} cues · lead {lead:.2f}s · video {vid:.1f}s")
+    elif not MANIFEST:
+        print("no voice manifest: run scripts/demo-voice.py first for a narrated cut")
 
 
 def main():
@@ -122,198 +400,30 @@ def main():
         if mobile:
             dev = p.devices["iPhone 13"]
             ctx_kw.update(dev)
-            # record at the device's viewport, not its screen, or the frame gets padded
-            ctx_kw["record_video_size"] = dict(dev["viewport"])
+            ctx_kw["record_video_size"] = dict(dev["viewport"])  # the device viewport, not its screen
         else:
             ctx_kw.update(viewport={"width": 1440, "height": 900}, device_scale_factor=1)
             ctx_kw["record_video_size"] = {"width": 1440, "height": 900}
         ctx = browser.new_context(**ctx_kw)
         ctx.add_init_script(OVERLAY)
         if mobile:
-            ctx.add_init_script("""document.addEventListener('DOMContentLoaded', () => { const s = document.createElement('style');
-              s.textContent = '#kd-cap{font-size:14.5px;line-height:1.3;padding:8px 12px;bottom:14px;max-width:88vw;border-radius:10px}#kd-title h1{font-size:38px}#kd-title p{font-size:14px;padding:0 24px;text-align:center}#kd-title .seal{width:56px;height:56px;font-size:30px}';
-              document.head.appendChild(s); });""")
+            ctx.add_init_script(MOBILE_CSS)
         pg = ctx.new_page()
+        d = Demo(pg, mobile)
         try:
-            run_scenes(pg, mobile)
+            run_scenes(d)
         except Exception as e:  # keep the partial video and a still for debugging
             print("DEMO FAILED:", type(e).__name__, str(e).split("\n")[0])
             print("url at failure:", pg.url)
             pg.screenshot(path=str(OUT / "_fail.png"))
-            ctx.close(); browser.close()
+            ctx.close()
+            browser.close()
             sys.exit(1)
+        t_close = d.now()
         ctx.close()
         raw = pg.video.path()
         browser.close()
-    finish(raw, mobile)
-
-
-def run_scenes(pg, mobile):
-    if True:
-
-        def cap(text, han=None, hold=0):
-            pg.evaluate("([t, h]) => window.__cap(t, h)", [text, han])
-            if hold:
-                pg.wait_for_timeout(hold)
-
-        def move_to(locator, steps=28):
-            box = locator.bounding_box()
-            if not box:
-                return
-            pg.mouse.move(box["x"] + box["width"] / 2, box["y"] + min(box["height"] / 2, 22), steps=steps)
-
-        def click(locator, settle=600):
-            locator.scroll_into_view_if_needed()
-            pg.wait_for_timeout(250)
-            move_to(locator)
-            pg.wait_for_timeout(180)
-            locator.click()
-            pg.wait_for_timeout(settle)
-
-        def scroll(to, duration=900):
-            pg.evaluate("y => window.scrollTo({ top: y, behavior: 'smooth' })", to)
-            pg.wait_for_timeout(duration)
-
-        def pause(ms):
-            pg.wait_for_timeout(ms)
-
-        # ---- Scene 1: title + the Oracle
-        pg.goto(f"{B}/", wait_until="networkidle")
-        pg.evaluate("window.__title(true)")
-        pg.mouse.move(720 if not mobile else 195, 500)
-        pause(2600)
-        pg.evaluate("window.__title(false)")
-        pause(900)
-        cap("Ask the Oracle about any trade.", "问", 1200)
-        ta = pg.locator("textarea")
-        click(ta, 200)
-        ta.press_sequentially(TRADE, delay=38)
-        pause(700)
-        cap("Players resolve on the free Sleeper feed. No paid data anywhere.", "卜", 900)
-        click(pg.locator("button[type=submit]"), 300)
-        wait_verdict(pg, "scene 1")
-        pause(900)
-        cap("Value above a free replacement, not raw points. The seal is the verdict.", "勝", 2800)
-        click(pg.get_by_role("button", name="Open the slip"), 500)
-        cap("Open the slip for each player: rest-of-season points, rank, bye, flags.", "签", 2600)
-        scroll(420 if not mobile else 900, 900)
-        pause(1200)
-
-        # ---- Scene 2: the Almanac
-        cap("The Almanac imports any Sleeper league.", "盟", 800)
-        nav = pg.get_by_role("link", name="Almanac").locator("visible=true").first
-        click(nav, 900)
-        field = pg.locator("input[placeholder*='Sleeper']")
-        click(field, 200)
-        field.press_sequentially(L, delay=22)
-        pause(400)
-        click(pg.locator("form button[type=submit]").first, 500)
-        pg.wait_for_selector("text=League pulse", timeout=60000)
-        pause(600)
-        cap("Standings with playoff odds and luck. One hue per direction, nothing to decode.", "名", 2600)
-        scroll(520 if not mobile else 900, 1000)
-        pause(1400)
-        cap("Positional strength as a heat grid: jade above the league, violet below.", "势", 800)
-        scroll(1150 if not mobile else 2300, 1100)
-        cells = pg.locator("span[title*='vs league average']")
-        if cells.count() > 8:
-            for i in (1, 2, 3, 9, 10):
-                move_to(cells.nth(i), steps=14)
-                pause(230)
-        pause(1200)
-        cap("Mark your team once…", "我", 700)
-        scroll(300 if not mobile else 700, 800)
-        row = pg.locator("li", has_text=args.team).first
-        mine = row.get_by_role("button", name="mine")
-        click(mine, 400)
-
-        # ---- Scene 3: the day page
-        pg.wait_for_selector("text=Today's reading", timeout=60000)
-        pause(700)
-        cap("…and your day page opens on what matters this week.", "日", 2600)
-        scroll(0, 500)
-        cap("Six lines of strength, eighteen weeks of byes, deadline and playoffs.", "爻", 800)
-        ribbon = pg.locator("[role=list][aria-label='Season weeks'] [role=listitem]")
-        if ribbon.count() >= 10:
-            click(ribbon.nth(9), 1800)
-            click(ribbon.nth(9), 300)
-        cap("Three readings: lineup, waivers, the next date that matters.", "签", 800)
-        first = pg.locator("button:has(span.han:text('签'))").first
-        move_to(first, steps=20)
-        pause(2200)
-        cap("Slips open one at a time for a single answer.", "补", 500)
-        click(pg.locator("button[aria-controls='slip-waivers']"), 1000)
-        scroll(pg.evaluate("document.querySelector('#slip-waivers').getBoundingClientRect().top + window.scrollY - 120"), 900)
-        pause(1800)
-        cap("Every player opens a sheet: value, this week's gates, FAAB from your league's own bids.", "人", 600)
-        chip = pg.locator("#slip-waivers button").filter(has_text="·").first
-        click(chip, 1200)
-        pause(2600)
-        sheet = pg.get_by_role("dialog")
-        sheet_scroll = sheet.locator("div.overflow-y-auto, [class*='overflow-y-auto']").first
-        try:
-            sheet_scroll.evaluate("el => el.scrollTo({ top: 420, behavior: 'smooth' })")
-        except Exception:
-            pass
-        pause(1600)
-        click(sheet.get_by_role("button", name="Close").last, 700)
-        cap("Trade targets come with a partner and an offer, and hand the Oracle the question.", "易", 600)
-        click(pg.locator("button[aria-controls='slip-trades']"), 1000)
-        scroll(pg.evaluate("document.querySelector('#slip-trades').getBoundingClientRect().top + window.scrollY - 120"), 900)
-        pause(2000)
-        import re as _re
-        rid = (_re.search(r"[?&]t=(\d+)", pg.url) or [None, None])[1]
-        with_offer = pg.locator("#slip-trades li", has_text="offer:")
-        card = with_offer.first if with_offer.count() else pg.locator("#slip-trades li").first
-        ask = card.locator("a", has_text="Ask the Oracle")
-        click(ask, 1500)
-
-        # ---- Scene 4: back in the Oracle, league-scored
-        if "give=" not in pg.url:
-            give = roster_name(L, rid) or "Rashee Rice"
-            cap(f"No offer was suggested here, so we name one: {give}.", "易", 900)
-            ta2 = pg.locator("textarea")
-            click(ta2, 200)
-            ta2.press("Home")
-            ta2.press_sequentially(f"{give} ", delay=40)
-            pause(500)
-            click(pg.locator("button[type=submit]"), 300)
-        wait_verdict(pg, "scene 4")
-        pause(700)
-        cap("Scored in your league's own rules this time, prefilled from the Almanac.", "規", 3000)
-
-        # ---- Scene 5: season ledger
-        cap("The season ledger: odds, luck, lineup efficiency and the schedule ahead.", "籍", 600)
-        pg.goto(f"{B}/league.html?l={L}&view=season", wait_until="networkidle")
-        pg.wait_for_selector("text=Playoff odds", timeout=60000)
-        pause(1200)
-        scroll(560 if not mobile else 900, 1200)
-        pause(1500)
-        scroll(1150 if not mobile else 1900, 1200)
-        pause(1500)
-
-        # ---- End card
-        pg.evaluate("""() => { const t = document.createElement('div'); t.id='kd-title';
-          t.innerHTML = '<div class="seal">签</div><h1>Kuangstradamus</h1><p>kuangstradamus.xyz · free Sleeper data · your week, read first</p><div class="cn">神谕读的是概率，不是定数</div>';
-          document.body.appendChild(t); }""")
-        pause(2800)
-
-
-def finish(raw, mobile):
-    stem = "kuangstradamus-demo-mobile" if mobile else "kuangstradamus-demo"
-    webm = OUT / f"{stem}.webm"
-    shutil.move(raw, webm)
-    shutil.rmtree(OUT / "_raw", ignore_errors=True)
-    print("webm:", webm, f"({webm.stat().st_size // 1024} KB)")
-
-    ff = shutil.which("ffmpeg") or next(iter(sorted((Path.home() / "Library/Caches/ms-playwright").glob("ffmpeg-*/ffmpeg-*"))), None)
-    if ff:
-        mp4 = OUT / f"{stem}.mp4"
-        r = subprocess.run([str(ff), "-y", "-loglevel", "error", "-i", str(webm), "-c:v", "libx264", "-pix_fmt", "yuv420p", "-crf", "20", "-movflags", "+faststart", str(mp4)])
-        if r.returncode == 0 and mp4.exists():
-            print("mp4: ", mp4, f"({mp4.stat().st_size // 1024} KB)")
-        else:
-            print("mp4 conversion unavailable (no H.264 encoder in this ffmpeg); the .webm plays in Chrome, Slack and Discord.")
+    finish(raw, mobile, d.cues, t_close)
 
 
 if __name__ == "__main__":

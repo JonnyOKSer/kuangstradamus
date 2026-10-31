@@ -1,0 +1,110 @@
+[
+  {
+    "id": "title",
+    "han": "谕",
+    "caption": "Kuangstradamus · the oracle of fantasy football",
+    "speech": "Kuangstradamus. The oracle of fantasy football."
+  },
+  {
+    "id": "ask",
+    "han": "问",
+    "caption": "Ask the Oracle about any trade.",
+    "speech": "Ask it about any trade, in plain English. What you give, then the word for, then what you get."
+  },
+  {
+    "id": "feed",
+    "han": "卜",
+    "caption": "Players resolve on the free Sleeper feed. No paid data anywhere.",
+    "speech": "Every name resolves on Sleeper's free feed. There is no paid data anywhere in this app."
+  },
+  {
+    "id": "verdict",
+    "han": "勝",
+    "caption": "Value above a free replacement, not raw points. The seal is the verdict.",
+    "speech": "The verdict is not raw points. It is value above a free replacement at each position, which is how a two-for-one should be judged. The seal is the call: even, slight, clear, or a fleecing."
+  },
+  {
+    "id": "slip",
+    "han": "签",
+    "caption": "Open the slip: rest-of-season points, rank, bye, flags.",
+    "speech": "Open the slip for each player: rest-of-season points, positional rank, bye week, and anything the model is nervous about."
+  },
+  {
+    "id": "almanac",
+    "han": "盟",
+    "caption": "The Almanac imports any Sleeper league.",
+    "speech": "The Almanac imports any Sleeper league, from a username or a league ID."
+  },
+  {
+    "id": "standings",
+    "han": "名",
+    "caption": "Standings with playoff odds and luck.",
+    "speech": "Standings carry playoff odds from a Monte Carlo over the remaining schedule, and luck: your actual wins against what the all-play record says you deserved."
+  },
+  {
+    "id": "strength",
+    "han": "势",
+    "caption": "Positional strength as a heat grid: jade above the league, violet below.",
+    "speech": "Positional strength is a heat grid. Jade means above the league average, violet means below. There is no legend to decode."
+  },
+  {
+    "id": "mark",
+    "han": "我",
+    "caption": "Mark your team once…",
+    "speech": "Mark your team once."
+  },
+  {
+    "id": "daypage",
+    "han": "日",
+    "caption": "…and your day page opens on what matters this week.",
+    "speech": "From then on, the Almanac opens on your day page. Six lines of positional strength, eighteen weeks of byes, the trade deadline and the playoffs, and today's reading."
+  },
+  {
+    "id": "readings",
+    "han": "签",
+    "caption": "Three readings: lineup, waivers, the next date that matters.",
+    "speech": "Three readings. Your lineup. The waiver you should bid on, and what it should cost. And the next date that matters. One number each."
+  },
+  {
+    "id": "slips",
+    "han": "补",
+    "caption": "Slips open one at a time for a single answer.",
+    "speech": "Below them are slips. One opens at a time, and each answers one question."
+  },
+  {
+    "id": "sheet",
+    "han": "人",
+    "caption": "Every player opens a sheet: value, this week's gates, FAAB from your league's own bids.",
+    "speech": "Every player opens a sheet: what he is worth in this league, this week's gates, and a FAAB estimate learned from your league's own winning bids."
+  },
+  {
+    "id": "trades",
+    "han": "易",
+    "caption": "Trade targets come with a partner and an offer, and hand the Oracle the question.",
+    "speech": "Trade targets come with a partner, the hole they fill, and a button that hands the Oracle the question."
+  },
+  {
+    "id": "offer",
+    "han": "易",
+    "caption": "No offer was suggested here, so we name one.",
+    "speech": "No offer was suggested for this one, so we name a player to give."
+  },
+  {
+    "id": "scored",
+    "han": "規",
+    "caption": "Scored in your league's own rules, prefilled from the Almanac.",
+    "speech": "Scored in your league's own rules this time, prefilled straight from the Almanac."
+  },
+  {
+    "id": "season",
+    "han": "籍",
+    "caption": "The season ledger: odds, luck, efficiency, schedule.",
+    "speech": "And the season ledger: odds, luck, lineup efficiency, and the schedule ahead. Everything is a mark first and a table second."
+  },
+  {
+    "id": "end",
+    "han": "签",
+    "caption": "kuangstradamus.xyz · free Sleeper data · your week, read first",
+    "speech": "Kuangstradamus. Free data, your week read first. The oracle reads probabilities, not certainties. Set your own lineup."
+  }
+]
