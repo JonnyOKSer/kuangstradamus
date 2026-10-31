@@ -122,12 +122,17 @@ def main():
         if mobile:
             dev = p.devices["iPhone 13"]
             ctx_kw.update(dev)
-            ctx_kw["record_video_size"] = {"width": 390, "height": 844}
+            # record at the device's viewport, not its screen, or the frame gets padded
+            ctx_kw["record_video_size"] = dict(dev["viewport"])
         else:
             ctx_kw.update(viewport={"width": 1440, "height": 900}, device_scale_factor=1)
             ctx_kw["record_video_size"] = {"width": 1440, "height": 900}
         ctx = browser.new_context(**ctx_kw)
         ctx.add_init_script(OVERLAY)
+        if mobile:
+            ctx.add_init_script("""document.addEventListener('DOMContentLoaded', () => { const s = document.createElement('style');
+              s.textContent = '#kd-cap{font-size:14.5px;line-height:1.3;padding:8px 12px;bottom:14px;max-width:88vw;border-radius:10px}#kd-title h1{font-size:38px}#kd-title p{font-size:14px;padding:0 24px;text-align:center}#kd-title .seal{width:56px;height:56px;font-size:30px}';
+              document.head.appendChild(s); });""")
         pg = ctx.new_page()
         try:
             run_scenes(pg, mobile)
