@@ -172,7 +172,8 @@ export async function analyzeTrade(body, options = {}) {
   );
 
   const names = (arr) => arr.map((p) => p.name).join(' + ') || '—';
-  const label = { A: 'Side A', B: 'Side B' };
+  // Side A is what the asker gives, side B what they get.
+  const label = { A: 'What you give', B: 'What you get' };
   const incomplete = unmatched.length > 0;
 
   let verdict;
@@ -192,23 +193,24 @@ export async function analyzeTrade(body, options = {}) {
       : `找不到球员 ${missing}，请检查拼写后重试。`;
   } else {
     const winLabel = winner ? label[winner] : null;
+    const youGet = winner === 'B';
     const verdictText = {
       even: 'Pretty even trade 🤝',
-      slight: `${winLabel} edges it`,
-      clear: `${winLabel} wins clearly 💪`,
-      lopsided: `${winLabel} fleeces the other side 🏆`,
+      slight: youGet ? 'You get slightly more than you give' : 'You give slightly more than you get',
+      clear: youGet ? 'You get the better end 💪' : 'You give more than you get',
+      lopsided: youGet ? 'You fleece the other side 🏆' : 'You get fleeced',
     }[category];
     verdict = verdictText;
     const detail = belowReplacement
       ? (winner
-        ? ` Neither side clears replacement level, so this is judged on raw projected points: ${winLabel} has ${marginPct}% more.`
+        ? ` Neither side clears replacement level, so this is judged on raw projected points: ${winLabel.toLowerCase()} has ${marginPct}% more.`
         : ' Neither side clears replacement level, and their projected points are near identical.')
       : winner
-        ? ` ${winLabel} carries ${marginPct}% more value over replacement, so whoever receives ${winLabel} gets the better end.`
+        ? ` ${winLabel} carries ${marginPct}% more value over replacement.`
         : ' The value gap is inside the noise of the projections.';
-    summary = `Side A (${names(sideA)}): ${valueA} value / ${totalA} ROS pts vs Side B (${names(sideB)}): ${valueB} value / ${totalB} ROS pts. Verdict: ${verdict}.${detail}`;
-    const zhVerdict = { even: '势均力敌', slight: `${winner === 'A' ? 'A方' : 'B方'}略占上风`, clear: `${winner === 'A' ? 'A方' : 'B方'}明显获胜`, lopsided: `${winner === 'A' ? 'A方' : 'B方'}大获全胜` }[category];
-    summaryZh = `A方（${names(sideA)}）价值 ${valueA}，剩余赛季预计 ${totalA} 分；B方（${names(sideB)}）价值 ${valueB}，剩余赛季预计 ${totalB} 分。判定：${zhVerdict}。`;
+    summary = `You give ${names(sideA)}: ${valueA} value / ${totalA} ROS pts. You get ${names(sideB)}: ${valueB} value / ${totalB} ROS pts. Verdict: ${verdict}.${detail}`;
+    const zhVerdict = { even: '势均力敌', slight: youGet ? '你得到的略多' : '你给出的略多', clear: youGet ? '你明显占优' : '你明显吃亏', lopsided: youGet ? '你大赚一笔' : '你被狠狠宰了' }[category];
+    summaryZh = `你给出 ${names(sideA)}：价值 ${valueA}，剩余赛季预计 ${totalA} 分；你得到 ${names(sideB)}：价值 ${valueB}，剩余赛季预计 ${totalB} 分。判定：${zhVerdict}。`;
   }
 
   return {
