@@ -15,12 +15,14 @@ const ROUND_WORDS = {
 const MAX_ROUND = 20;
 const ORDINAL = '(?:\\d{1,2}(?:st|nd|rd|th)|first|second|third|fourth|fifth|sixth|seventh|eighth|ninth|tenth|eleventh|twelfth|thirteenth|fourteenth|fifteenth|sixteenth)';
 const PICK_RE = new RegExp(
-  `^(?:(?:a|an|the)\\s+)?(?:(\\d{4})\\s+)?(?:round\\s+(\\d{1,2})|${ORDINAL})(?:\\s+round)?(?:\\s+(?:pick|rounder|selection))?(?:\\s+(?:in\\s+)?(\\d{4}))?$`,
+  `^(?:(?:a|an|the|my|his|her|their|our)\\s+)?(?:(\\d{4})\\s+)?(?:(early|mid|late)\\s+)?(?:round\\s+(\\d{1,2})|${ORDINAL})(?:\\s+round)?(?:\\s+(?:rookie\\s+)?(?:pick|rounder|selection))?(?:\\s+(?:in\\s+)?(\\d{4}))?$`,
   'i',
 );
+// "2027 1.05": round 1, the fifth slot. The dynasty shorthand everyone types.
+const DOT_RE = /^(?:(?:a|an|the|my|his|her|their|our)\s+)?(?:(\d{4})\s+)?(\d{1,2})\.(\d{2})(?:\s+(?:rookie\s+)?pick)?(?:\s+(?:in\s+)?(\d{4}))?$/i;
 
 function roundFrom(match) {
-  if (match[2]) return Number(match[2]);              // "round 8"
+  if (match[3]) return Number(match[3]);              // "round 8"
   const token = match[0].match(new RegExp(ORDINAL, 'i'))?.[0]?.toLowerCase();
   if (!token) return null;
   const digits = token.match(/^\d{1,2}/);
@@ -30,12 +32,23 @@ function roundFrom(match) {
 export function parseItem(raw, { defaultPickYear } = {}) {
   const text = raw.trim().replace(/\s+/g, ' ');
   if (!text) return null;
+  const fallbackYear = () => Number(defaultPickYear || new Date().getFullYear() + 1);
+  const dot = text.match(DOT_RE);
+  if (dot) {
+    const round = Number(dot[2]);
+    const slot = Number(dot[3]);
+    if (round >= 1 && round <= MAX_ROUND && slot >= 1 && slot <= 32) {
+      const year = Number(dot[1] || dot[4] || fallbackYear());
+      return { type: 'pick', year, round, slot, name: `${year} pick ${round}.${String(slot).padStart(2, '0')}` };
+    }
+  }
   const pick = text.match(PICK_RE);
   if (pick) {
     const round = roundFrom(pick);
     if (round && round >= 1 && round <= MAX_ROUND) {
-      const year = Number(pick[1] || pick[3] || defaultPickYear || new Date().getFullYear() + 1);
-      return { type: 'pick', year, round, name: `${year} ${ordinal(round)} round pick` };
+      const year = Number(pick[1] || pick[4] || fallbackYear());
+      const third = pick[2] ? pick[2].toLowerCase() : null;
+      return { type: 'pick', year, round, ...(third ? { third } : {}), name: `${year} ${third ? `${third} ` : ''}${ordinal(round)} round pick` };
     }
   }
   return { type: 'player', name: text.replace(/^(?:a|an|the|my|his|her|their|our)\s+/i, '') };

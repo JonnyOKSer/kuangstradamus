@@ -272,9 +272,11 @@ function Prophecy({ consultation, latest, contextLabel }) {
                     <span className="nums"><b>{fmt(p.value)}</b> <span className="text-xs text-fg-2">{t('value', '价值')}</span></span>
                   </div>
                   <p className="nums mt-1 text-xs text-fg-2">
-                    {p.type === 'pick' ? t(`counted at ${fmt(p.value)} of ${fmt(p.rawValue)} when used`, `按 ${fmt(p.value)} 计（使用时 ${fmt(p.rawValue)}）`) : <>{fmt(p.points)} {t('ROS pts', '剩余分')}{p.rank ? ` · ${p.rank}` : ''}{p.byeWeek ? ` · ${t('bye', '轮空')} ${p.byeWeek}` : ''}</>}
+                    {p.type === 'pick'
+                      ? <>{t(`counted at ${fmt(p.value)} of ${fmt(p.rawValue)} when used`, `按 ${fmt(p.value)} 计（使用时 ${fmt(p.rawValue)}）`)}{p.pick?.league ? ` · ${t('from this league\'s drafts', '依据本联盟选秀')} (${p.pick.league.n})` : ` · ${t('standard-league calibration', '标准联盟校准')}`}</>
+                      : <>{fmt(p.points)} {t('ROS pts', '剩余分')}{p.rank ? ` · ${p.rank}` : ''}{p.byeWeek ? ` · ${t('bye', '轮空')} ${p.byeWeek}` : ''}</>}
                   </p>
-                  {p.flags?.length > 0 && <p className="mt-0.5 text-xs text-amber">{p.flags.map((f) => f.text).join(' · ')}</p>}
+                  {p.flags?.length > 0 && <p className={`mt-0.5 text-xs ${p.flags.every((f) => f.level === 'info' || f.level === 'low') ? 'text-fg-2' : 'text-amber'}`}>{p.flags.map((f) => f.text).join(' · ')}</p>}
                 </li>
               ))}
             </ul>

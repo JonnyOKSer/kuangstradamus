@@ -6,6 +6,8 @@
 // slot's free fill-in is worth, not by raw point sums. Points are already
 // league-scored by the caller (see scoring.js), so custom rules flow through.
 
+import { curveValue, describePickBasis } from './draftValue.js';
+
 export const DEFAULT_ROSTER_POSITIONS = ['QB', 'RB', 'RB', 'WR', 'WR', 'TE', 'FLEX', 'K', 'DEF', 'BN', 'BN', 'BN', 'BN', 'BN', 'BN'];
 export const DEFAULT_NUM_TEAMS = 12;
 
@@ -156,10 +158,15 @@ export function pickValue(pick, {
   currentSeason = null,
   leagueType = 'redraft',
   scale = 1,
+  curve = null,      // this league's own draft history (domain/draftValue.js), when available
+  teams = 12,
 } = {}) {
   const round = Number(pick?.round) || 0;
+  const fromCurve = curve ? curveValue(curve, { round, slot: pick?.slot, third: pick?.third, teams }) : null;
   const measured = calibration?.rounds?.[round]?.value;
-  const whenUsed = Number(((measured ?? PICK_VALUES[round] ?? 0) * scale).toFixed(2));
+  // A pick is an option, not an obligation: when the typical player taken there
+  // is below replacement, the pick is worth about nothing, not less than nothing.
+  const whenUsed = Math.max(0, Number((fromCurve ? fromCurve.value : (measured ?? PICK_VALUES[round] ?? 0) * scale).toFixed(2)));
 
   const seasonsAway = currentSeason && pick?.year ? Math.max(0, Number(pick.year) - Number(currentSeason)) : 0;
   const weight = seasonsAway === 0 ? 1 : (FUTURE_PICK_WEIGHT[leagueType] ?? 0) ** seasonsAway;
@@ -169,9 +176,12 @@ export function pickValue(pick, {
     whenUsed,
     seasonsAway,
     leagueType,
-    usefulRate: calibration?.rounds?.[round]?.usefulRate ?? null,
-    median: calibration?.rounds?.[round]?.median ?? null,
-    basis: measured != null ? 'measured' : 'fallback',
+    usefulRate: fromCurve?.hitRate ?? calibration?.rounds?.[round]?.usefulRate ?? null,
+    median: fromCurve?.median ?? calibration?.rounds?.[round]?.median ?? null,
+    basis: fromCurve ? `league-${fromCurve.basis}` : measured != null ? 'measured' : 'fallback',
+    league: fromCurve
+      ? { n: fromCurve.n, nThird: fromCurve.nThird, third: fromCurve.third, hitRate: fromCurve.hitRate, mean: fromCurve.mean, prior: fromCurve.prior, seasons: curve.seasons, measure: curve.measure, note: describePickBasis(round, fromCurve, curve) }
+      : null,
   };
 }
 

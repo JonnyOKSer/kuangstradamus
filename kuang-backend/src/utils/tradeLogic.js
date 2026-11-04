@@ -45,6 +45,8 @@ async function standaloneContext({ scoring, season, playoffWeeks }) {
     leagueName: null,
     leagueType: 'redraft',   // no league given: assume the common case
     scale: 1,
+    curve: null,
+    teams: 12,
   };
 }
 
@@ -64,6 +66,8 @@ async function leagueContext(leagueId) {
     leagueName: ctx.imported.league.name,
     leagueType: ctx.imported.league.leagueType || 'redraft',
     scale: ctx.scale ?? 1,
+    curve: ctx.draft?.curve || null,
+    teams: ctx.imported.league.totalRosters || 12,
   };
 }
 
@@ -87,8 +91,11 @@ export async function analyzeTrade(body, options = {}) {
         currentSeason: Number(ctx.season) || undefined,
         leagueType: ctx.leagueType || 'redraft',
         scale: ctx.scale ?? 1,
+        curve: ctx.curve,
+        teams: ctx.teams,
       });
       const flags = [];
+      if (pv.league?.note) flags.push({ type: 'pick', level: 'info', text: pv.league.note });
       if (pv.seasonsAway > 0 && pv.value === 0) {
         flags.push({
           type: 'pick',

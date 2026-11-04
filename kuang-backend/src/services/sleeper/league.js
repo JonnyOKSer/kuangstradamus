@@ -33,6 +33,23 @@ export const getLeagueUsers = (leagueId) => fetchJson(`${APP}/league/${leagueId}
 export const getMatchups = (leagueId, week) => fetchJson(`${APP}/league/${leagueId}/matchups/${week}`, { ttl: TTL.league });
 export const getTransactions = (leagueId, round) => fetchJson(`${APP}/league/${leagueId}/transactions/${round}`, { ttl: TTL.league });
 export const getTradedPicks = (leagueId) => fetchJson(`${APP}/league/${leagueId}/traded_picks`, { ttl: TTL.league });
+export const getDrafts = (leagueId) => fetchJson(`${APP}/league/${leagueId}/drafts`, { ttl: TTL.league });
+// A completed draft never changes, so its picks can sit in cache for a day.
+export const getDraftPicks = (draftId) => fetchJson(`${APP}/draft/${draftId}/picks`, { ttl: TTL.players });
+
+/** This league and its previous seasons, newest first, following previous_league_id. */
+export async function getLeagueChain(leagueId, maxSeasons = 5) {
+  const chain = [];
+  let id = leagueId;
+  while (id && chain.length < maxSeasons) {
+    const l = await fetchJson(`${APP}/league/${id}`, { ttl: TTL.league });
+    if (!l) break;
+    chain.push({ leagueId: l.league_id, season: Number(l.season), type: l.settings?.type ?? 0, draftId: l.draft_id || null });
+    id = l.previous_league_id;
+  }
+  return chain;
+}
+
 export const getWinnersBracket = (leagueId) => fetchJson(`${APP}/league/${leagueId}/winners_bracket`, { ttl: TTL.league });
 
 /** Sleeper's scoring_settings.rec value tells us the receiving format. */

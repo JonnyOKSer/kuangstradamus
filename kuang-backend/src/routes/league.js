@@ -1,7 +1,7 @@
 import express from 'express';
 import { getUser, getUserLeagues, scoringFormatOf } from '../services/sleeper/league.js';
 import { getState } from '../services/sleeper/projections.js';
-import { leagueSummary, seasonReport, teamReport, lineupForTeam } from '../services/analysis.js';
+import { leagueSummary, seasonReport, teamReport, lineupForTeam, draftReport } from '../services/analysis.js';
 import { sendError } from './errors.js';
 
 const router = express.Router();
@@ -73,6 +73,15 @@ router.post('/:leagueId/team/:rosterId/lineup/apply', (_req, res) => {
     error: 'Automatic lineup changes are not supported for Sleeper. Its public API is read-only; apply the suggested moves in the Sleeper app.',
     plannedPlatforms: ['yahoo'],
   });
+});
+
+// GET /api/league/:leagueId/draft  → every pick in the league's history, what it became, and the value curve
+router.get('/:leagueId/draft', async (req, res) => {
+  try {
+    res.json(await draftReport(req.params.leagueId));
+  } catch (err) {
+    sendError(res, err, 'league/draft');
+  }
 });
 
 export default router;

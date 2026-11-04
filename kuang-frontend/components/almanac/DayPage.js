@@ -1,6 +1,6 @@
-import { useMemo, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import { Button, Card, DataTable, DivergeBar, GlanceCard, Hexagram, Ledger, Note, Pill, PlayerChip, SectionTitle, Slip, Slot, WeekRibbon } from '../ui'
-import { fmt } from '../../lib/api'
+import { api, fmt } from '../../lib/api'
 import { useUI } from '../../lib/ui'
 import { href } from '../../lib/url'
 import { myTeam, setMyTeam } from '../../lib/memory'
@@ -153,7 +153,7 @@ export default function DayPage({ summary, team, loading, open, onOpen, onPlayer
           <div id="ledger" className="mt-6">
             <SectionTitle char="籍" right={<button type="button" onClick={() => setLedgerOpen(!ledgerOpen)} aria-expanded={ledgerOpen} className="text-xs text-neon">{ledgerOpen ? t('close', '收起') : t('open', '展开')}</button>}>{t('Ledger', '记录')}</SectionTitle>
             {ledgerOpen ? (
-              <LedgerBlock team={team} tab={ledgerTab} onTab={setLedgerTab} onPlayer={onPlayer} />
+              <LedgerBlock team={team} tab={ledgerTab} onTab={setLedgerTab} onPlayer={onPlayer} leagueId={leagueId} />
             ) : (
               <button type="button" onClick={() => setLedgerOpen(true)} className="w-full rounded-[10px] border border-line bg-surface-1 px-3.5 py-3 text-left text-sm text-fg-2 hover:border-line-2">
                 {t(`Roster (${team.roster.length}), lineup trace, held decisions, all waivers, method`, `阵容（${team.roster.length}）、阵容明细、未采纳、全部自由球员、方法`)} <span className="text-neon">→</span>
@@ -166,7 +166,7 @@ export default function DayPage({ summary, team, loading, open, onOpen, onPlayer
       <aside className="hidden lg:block">
         <div className="sticky top-24">
           <SectionTitle char="籍">{t('Ledger', '记录')}</SectionTitle>
-          <LedgerBlock team={team} tab={ledgerTab} onTab={setLedgerTab} onPlayer={onPlayer} compact />
+          <LedgerBlock team={team} tab={ledgerTab} onTab={setLedgerTab} onPlayer={onPlayer} compact leagueId={leagueId} />
         </div>
       </aside>
     </div>
@@ -491,7 +491,7 @@ function StrengthSlip({ rows, team, onPlayer }) {
 
 /* ------------------------------------------------------------ ledger */
 
-function LedgerBlock({ team, tab, onTab, onPlayer, compact = false }) {
+function LedgerBlock({ team, tab, onTab, onPlayer, compact = false, leagueId }) {
   const { t } = useUI()
   const { lineup, waivers } = team
   const L = team.league
@@ -572,6 +572,10 @@ function LedgerBlock({ team, tab, onTab, onPlayer, compact = false }) {
       ),
     },
     {
+      id: 'draft', char: '选', label: t('Draft', '选秀'),
+      content: <DraftLedger leagueId={leagueId} pickCurve={L?.pickCurve} onPlayer={onPlayer} compact={compact} />,
+    },
+    {
       id: 'method', char: '法', label: t('Method', '方法'),
       content: (
         <div className="space-y-3 text-xs text-fg-2">
@@ -587,6 +591,72 @@ function LedgerBlock({ team, tab, onTab, onPlayer, compact = false }) {
     },
   ]
   return <Ledger tabs={tabs} value={tab} onChange={onTab} />
+}
+
+/** What every pick in this league's history became, and the value curve picks are priced on. */
+function DraftLedger({ leagueId, pickCurve, onPlayer, compact }) {
+  const { t } = useUI()
+  const [data, setData] = useState(null)
+  const [error, setError] = useState('')
+  useEffect(() => {
+    if (!leagueId || data) return undefined
+    let alive = true
+    api(`/api/league/${leagueId}/draft`).then((d) => alive && setData(d.draft)).catch((e) => alive && setError(e.message))
+    return () => { alive = false }
+  }, [leagueId, data])
+
+  if (!pickCurve && !data) return <p className="text-sm text-fg-2">{t('No completed drafts found for this league.', '未找到本联盟已完成的选秀。')}</p>
+  const curve = data?.curve || pickCurve
+  const auction = curve?.auction || data?.drafts?.every((d) => d.type === 'auction')
+  const rounds = Object.entries(curve?.rounds || {}).filter(([, v]) => v.n > 0 || Number(v.value) > 0).slice(0, 10)
+  const unit = auction ? t('tier', '档') : t('round', '轮')
+  const seasons = curve?.seasons || []
+
+  return (
+    <div className="space-y-3 text-sm">
+      <p className="text-xs text-fg-2">
+        {t(
+          `Picks are priced on what this league's own picks became: ${curve?.picks || 0} ${auction ? 'auction buys' : 'picks'} from ${seasons.length} draft${seasons.length === 1 ? '' : 's'} (${seasons.join(', ')}), each scored by what the player ${curve?.measure === 'now' ? 'is worth today' : 'produced that season'} in this league's rules. Keeper slots are excluded.${auction ? ' Auction buys are ranked by price and cut into tiers of one per team, so tier 1 is the priciest buy on every roster.' : ''} Small samples lean on a five-season standard-league calibration.`,
+          `选秀签按本联盟历史选秀的实际结果估值：${seasons.length} 次选秀共 ${curve?.picks || 0} 个选择，按本联盟规则计算球员${curve?.measure === 'now' ? '当前价值' : '当季产出'}。保留球员不计入。`,
+        )}
+      </p>
+      <DataTable
+        dense
+        head={[unit, t('Value used', '采用值'), t('League avg', '联盟均值'), t('Picks', '样本'), t('Hit rate', '命中率'), t('Standard', '标准联盟'), t('Basis', '依据')]}
+        rows={rounds.map(([r, v]) => [
+          <b key="r">{r}</b>, fmt(Math.max(0, v.value), 0), v.mean == null ? '—' : <span key="m" className={v.mean >= 0 ? '' : 'text-violet'}>{fmt(v.mean, 0)}</span>, v.n, v.hitRate == null ? '—' : `${Math.round(v.hitRate * 100)}%`, fmt(v.prior, 0),
+          <Pill key="b" tone={v.basis === 'league' ? 'jade' : v.basis === 'blend' ? 'amber' : 'neutral'}>{v.basis}</Pill>,
+        ])}
+        caption={t('Value = rest-of-season points above a free replacement. Hit rate = share of picks that finished above replacement. A pick is an option, so a negative average counts as zero.', '价值 = 高于替补的分数；命中率 = 高于替补的比例；均值为负时按零计。')}
+      />
+      {error && <p className="text-xs text-neon">{error}</p>}
+      {!data && !error && <p className="text-xs text-fg-3">{t('Loading every pick…', '正在加载所有选择……')}</p>}
+      {data?.drafts?.map((d) => {
+        const picks = data.outcomes.filter((o) => o.season === d.season).sort((a, b) => (a.overall ?? 0) - (b.overall ?? 0))
+        return (
+          <details key={d.draftId} className="rounded-[8px] border border-line bg-surface-2 px-3 py-2">
+            <summary className="cursor-pointer text-sm">
+              <b className="nums">{d.season}</b> · {d.type} · {t(`${d.picks} picks, ${d.keepers} keeper slots excluded`, `${d.picks} 个选择，排除 ${d.keepers} 个保留位`)}
+            </summary>
+            <div className="mt-2">
+              <DataTable
+                dense
+                head={[auction ? '$' : t('Pick', '签位'), t('Player', '球员'), t('Pos', '位置'), t('That season', '当季'), t('Now', '现在')]}
+                rows={picks.slice(0, compact ? 40 : 200).map((o) => [
+                  auction ? <span key="a" className="nums">{o.round}.{String(o.slot).padStart(2, '0')} · ${o.amount}</span> : <span key="a" className="nums">{o.round}.{String(o.slot).padStart(2, '0')}</span>,
+                  <button key="n" type="button" onClick={() => onPlayer(o.playerId)} className="text-left hover:text-neon">{o.name}</button>,
+                  o.position || '—',
+                  <span key="s" className={`nums ${o.seasonValue > 0 ? 'text-jade' : o.seasonValue < 0 ? 'text-violet' : ''}`}>{o.seasonValue == null ? '—' : `${o.seasonValue > 0 ? '+' : ''}${fmt(o.seasonValue, 0)}`}</span>,
+                  <span key="w" className={`nums ${o.nowValue > 0 ? 'text-jade' : o.nowValue < 0 ? 'text-violet' : ''}`}>{o.nowValue == null ? '—' : `${o.nowValue > 0 ? '+' : ''}${fmt(o.nowValue, 0)}`}</span>,
+                ])}
+              />
+              {picks.length > (compact ? 40 : 200) && <p className="mt-1 text-xs text-fg-3">{t(`Showing the first ${compact ? 40 : 200}.`, `仅显示前 ${compact ? 40 : 200} 个。`)}</p>}
+            </div>
+          </details>
+        )
+      })}
+    </div>
+  )
 }
 
 export { Faab }

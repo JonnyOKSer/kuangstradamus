@@ -59,6 +59,13 @@ export async function getWeeklyProjections(season, week, positions = FANTASY_POS
   return (rows || []).map(mapRow);
 }
 
+/** Season-to-date (or full past season) actual stats for every player at the given positions, one request. */
+export async function getSeasonStats(season, positions = FANTASY_POSITIONS) {
+  const url = `${API}/stats/nfl/${season}?season_type=regular&${posQuery(positions)}&order_by=pts_ppr`;
+  const rows = await fetchJson(url, { ttl: TTL.stats });
+  return (rows || []).map(mapRow);
+}
+
 /** { "1": row|null, ..., "18": row|null } — a null week is the bye. */
 export async function getPlayerWeeklyProjections(playerId, season) {
   const url = `${API}/projections/nfl/player/${playerId}?season=${season}&season_type=regular&grouping=week`;

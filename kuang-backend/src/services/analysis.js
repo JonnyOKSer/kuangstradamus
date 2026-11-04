@@ -2,7 +2,12 @@
 // context (import + projections scored with that league's rules + replacement
 // levels) and exposes the report shapes the routes return.
 
-import { importLeague, getTransactions } from './sleeper/league.js';
+import { importLeague, getTransactions, getDrafts, getDraftPicks, getLeagueChain } from './sleeper/league.js';
+import { getSeasonStats } from './sleeper/projections.js';
+import { normalizeDraft, draftOutcomes, buildPickCurve } from '../domain/draftValue.js';
+import { PICK_VALUES } from '../domain/valuation.js';
+import { scoreStats } from '../domain/scoring.js';
+import PICK_CAL from '../data/pickCalibration.json' with { type: 'json' };
 import { loadPlayers, getTrending } from './sleeper/players.js';
 import { buildRosTable, DEFAULT_LAST_WEEK } from './sleeper/projections.js';
 import { computeReplacementLevels, playerFlags, activePositions, leagueScale } from '../domain/valuation.js';
@@ -88,6 +93,15 @@ async function build(leagueId) {
   // fetching where bids exist — a rolling-priority league has none.
   const faab = isFaabLeague(imported.league) ? await loadBidHistory(imported, leaguePts, levels) : null;
 
+  const scale = leagueScale(levels, activePositions(imported.league.rosterPositions), ros.weeks.length || 17);
+
+  // What this league's own draft picks have turned into, so a traded pick is
+  // priced on this league's history rather than a generic table.
+  const draft = await loadDraftHistory(imported, { leaguePts, levels, isCurrent, scale, scoring }).catch((err) => {
+    console.warn('⚠️ draft history unavailable:', err.message);
+    return null;
+  });
+
   return {
     imported,
     faab,
@@ -102,11 +116,75 @@ async function build(leagueId) {
     activePositions: activePositions(imported.league.rosterPositions),
     // Constants below are PPR-calibrated; multiplying by this makes them mean
     // the same thing in a league that scores 30% higher.
-    scale: leagueScale(levels, activePositions(imported.league.rosterPositions), ros.weeks.length || 17),
+    scale,
+    draft,
     byeByTeam,
     scoringAudit: auditScoring(scoring, projectedKeys),
     scoringDescription: describeScoring(scoring),
     builtAt: Date.now(),
+  };
+}
+
+/**
+ * Every completed draft in this league's history (up to five seasons), each
+ * pick scored by what the player actually produced that season in this
+ * league's rules (and what he is worth today), then folded into a value curve.
+ */
+async function loadDraftHistory(imported, { leaguePts, levels, isCurrent, scale, scoring }) {
+  const league = imported.league;
+  const chain = await getLeagueChain(league.id, 5);
+  const draftsRaw = (await Promise.all(chain.map((c) => getDrafts(c.leagueId).catch(() => []))))
+    .flat()
+    .filter((d) => d && d.status === 'complete');
+  const picksByDraft = await Promise.all(draftsRaw.map((d) => getDraftPicks(d.draft_id).catch(() => [])));
+  const drafts = draftsRaw.map((d, i) => normalizeDraft(d, picksByDraft[i] || [])).filter((d) => d.picks.length);
+  if (!drafts.length) return null;
+
+  // One value table per draft season: season points in this league's scoring,
+  // above a replacement level derived from this league's roster slots.
+  const seasons = [...new Set(drafts.map((d) => d.season).filter(Boolean))];
+  const tables = new Map();
+  for (const season of seasons) {
+    const rows = await getSeasonStats(season).catch(() => []);
+    const pts = new Map();
+    for (const r of rows) pts.set(r.playerId, { position: r.position, pts: scoreStats(r.stats, scoring) });
+    if (isCurrent && String(season) === String(imported.state.season)) {
+      // the current season is still being played: to-date points plus the rest-of-season projection
+      for (const [id, proj] of leaguePts) {
+        const e = pts.get(id) || { position: proj.position, pts: 0 };
+        e.pts += proj.total;
+        pts.set(id, e);
+      }
+    }
+    if (!pts.size) continue;
+    const seasonLevels = computeReplacementLevels({ rosterPositions: league.rosterPositions, numTeams: league.totalRosters, players: [...pts.values()] });
+    tables.set(season, { pts, levels: seasonLevels });
+  }
+
+  const valueOf = (playerId, season, position) => {
+    const t = tables.get(season);
+    let seasonValue = null;
+    if (t) {
+      const e = t.pts.get(String(playerId));
+      const pos = e?.position || position;
+      // drafted but never produced: a zero season, not a missing one
+      seasonValue = pos ? playerValue(e?.pts ?? 0, pos, t.levels).rawVorp : null;
+    }
+    const now = leaguePts.get(String(playerId));
+    const nowValue = now ? playerValue(now.total, now.position, levels).rawVorp : null;
+    return { season: seasonValue, now: nowValue };
+  };
+
+  const outcomes = draftOutcomes(drafts, valueOf);
+  const measure = league.leagueType === 'dynasty' ? 'now' : 'season';
+  const maxRound = Math.max(1, ...drafts.map((d) => Math.max(...d.picks.map((p) => p.round))));
+  const curve = buildPickCurve(outcomes, { measure, prior: PICK_CAL, fallback: PICK_VALUES, scale, maxRound: Math.min(maxRound, 20) });
+  return {
+    measure,
+    curve,
+    outcomes,
+    drafts: drafts.map(({ picks, ...d }) => ({ ...d, picks: picks.length })),
+    seasons: chain.map((c) => c.season),
   };
 }
 
@@ -160,6 +238,15 @@ function leagueHeader(ctx) {
       ? { budget: ctx.faab.budget, claimsSeen: ctx.faab.claimsSeen, wonSeen: ctx.faab.wonSeen, enabled: true }
       : { enabled: false },
     bonusCalibration: calibrationInfo(),
+    pickCurve: ctx.draft
+      ? {
+        measure: ctx.draft.measure,
+        seasons: ctx.draft.curve.seasons,
+        picks: ctx.draft.curve.picks,
+        drafts: ctx.draft.drafts,
+        rounds: Object.fromEntries(Object.entries(ctx.draft.curve.rounds).map(([r, v]) => [r, { value: v.value, mean: v.mean, n: v.n, hitRate: v.hitRate, basis: v.basis, prior: v.prior }])),
+      }
+      : null,
     dataFreshness: {
       leagueBuiltAt: new Date(ctx.builtAt).toISOString(),
       trendWeeks: ctx.trends?.weeks ?? [],
@@ -296,6 +383,21 @@ export async function teamReport(leagueId, rosterId, { week } = {}) {
       supported: false,
       reason: 'Sleeper has no official write API. Lineups here are suggestions; apply them in the Sleeper app. Yahoo auto-set is planned once API access is approved.',
     },
+  };
+}
+
+/** What every pick in this league's history became, with the value curve it feeds. */
+export async function draftReport(leagueId) {
+  const ctx = await buildLeagueContext(leagueId);
+  const byId = ctx.playersById;
+  return {
+    league: leagueHeader(ctx),
+    draft: ctx.draft
+      ? {
+        ...ctx.draft,
+        outcomes: ctx.draft.outcomes.map((o) => ({ ...o, name: byId.get(o.playerId)?.name || o.name, team: byId.get(o.playerId)?.team || null })),
+      }
+      : null,
   };
 }
 
