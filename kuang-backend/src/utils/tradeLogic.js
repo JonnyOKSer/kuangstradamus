@@ -96,11 +96,11 @@ export async function analyzeTrade(body, options = {}) {
       });
       const flags = [];
       if (pv.league?.note) flags.push({ type: 'pick', level: 'info', text: pv.league.note });
-      if (pv.seasonsAway > 0 && pv.value === 0) {
+      if (pv.seasonsAway > 0 && (ctx.leagueType || 'redraft') === 'redraft') {
         flags.push({
           type: 'pick',
           level: 'medium',
-          text: `A ${item.year} pick scores nothing for this season in a redraft league. Historically worth ${pv.whenUsed} above replacement once used, and useful ${Math.round((pv.usefulRate ?? 0) * 100)}% of the time.`,
+          text: `A ${item.year} pick scores nothing for this season in a redraft league. Worth ${pv.whenUsed} above replacement once used, useful ${Math.round((pv.usefulRate ?? 0) * 100)}% of the time.`,
         });
       } else if (pv.seasonsAway > 0) {
         flags.push({

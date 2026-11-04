@@ -10,6 +10,10 @@
 // price and cut into tiers of one pick per team: the ten priciest buys in a
 // ten-team league are "round 1". Keeper slots are not picks and are excluded
 // everywhere.
+//
+// A pick is an option: you keep the hits and drop the busts, so the value of a
+// round is the average of max(0, outcome), not the raw average. The raw
+// average is kept for the record (it shows how often a round busts).
 
 const r1 = (x) => Number((x ?? 0).toFixed(1));
 const r2 = (x) => Number((x ?? 0).toFixed(2));
@@ -128,16 +132,18 @@ export function buildPickCurve(outcomes, { measure = 'season', prior = null, fal
     const d = byRound[r];
     const n = d?.values.length || 0;
     const m = n ? mean(d.values) : null;
-    const value = n ? (n * m + SHRINK_ROUND * priorValue) / (n + SHRINK_ROUND) : priorValue;
+    const om = n ? mean(d.values.map((v) => Math.max(0, v))) : null;   // option value: busts cut at zero
+    const value = n ? (n * om + SHRINK_ROUND * priorValue) / (n + SHRINK_ROUND) : priorValue;
     const thirds = {};
     for (const t of THIRDS) {
       const vs = d?.thirds[t] || [];
-      const tm = mean(vs);
+      const tm = mean(vs.map((v) => Math.max(0, v)));
       thirds[t] = { n: vs.length, mean: tm == null ? null : r1(tm), value: r1(vs.length ? (vs.length * tm + SHRINK_THIRD * value) / (vs.length + SHRINK_THIRD) : value) };
     }
     rounds[r] = {
       n,
       mean: m == null ? null : r1(m),
+      optionMean: om == null ? null : r1(om),
       median: n ? r1(median(d.values)) : null,
       hitRate: n ? r2(d.values.filter((v) => v > 0).length / n) : null,
       prior: r1(priorValue),
@@ -162,7 +168,7 @@ export function curveValue(curve, { round, slot, third, teams }) {
   const r = curve?.rounds?.[round];
   if (!r) return null;
   const t = third || thirdOf(slot, teams || 12);
-  const base = { n: r.n, hitRate: r.hitRate, basis: r.basis, mean: r.mean, median: r.median, prior: r.prior, round };
+  const base = { n: r.n, hitRate: r.hitRate, basis: r.basis, mean: r.mean, optionMean: r.optionMean, median: r.median, prior: r.prior, round };
   if (t && r.thirds?.[t]) return { ...base, value: r.thirds[t].value, third: t, nThird: r.thirds[t].n };
   return { ...base, value: r.value, third: null, nThird: 0 };
 }
@@ -177,12 +183,12 @@ const ordinal = (n) => {
 export function describePickBasis(round, cv, curve) {
   if (!cv) return null;
   const span = curve?.seasons?.length ? (curve.seasons.length === 1 ? `the ${curve.seasons[0]} draft` : `the ${curve.seasons[0]}–${curve.seasons[curve.seasons.length - 1]} drafts`) : 'this league';
-  const what = curve?.measure === 'now' ? 'are worth' : 'produced';
+  const what = curve?.measure === 'now' ? 'are worth' : 'have been worth';
   const unit = curve?.auction ? `${ordinal(round)}-tier auction buys (one per team, by price)` : `${ordinal(round)}-round picks`;
   if (cv.basis === 'prior') return `This league has no ${unit} on record, so the number comes from five seasons of standard leagues.`;
-  const hit = cv.hitRate != null ? `, ${Math.round(cv.hitRate * 100)}% of them above replacement` : '';
+  const hit = cv.hitRate != null ? `${Math.round(cv.hitRate * 100)}% finished above replacement` : '';
   const third = cv.third && cv.nThird ? ` (${cv.third} in the ${curve?.auction ? 'tier' : 'round'}: ${cv.nThird})` : '';
   const shrink = cv.basis === 'blend' ? ' Blended with the standard-league calibration because the sample is small.' : '';
-  const floor = cv.mean != null && cv.mean <= 0 ? ' A pick is an option, so it is counted at zero rather than as a loss.' : '';
-  return `In this league, ${unit} ${what} ${cv.mean} value on average across ${cv.n} picks from ${span}${hit}${third}.${shrink}${floor}`;
+  const busts = cv.mean != null && cv.optionMean != null && cv.mean < cv.optionMean - 1 ? ` Counting busts in full the average is ${cv.mean}, but a pick is an option: you keep the hits and drop the rest.` : '';
+  return `In this league, ${unit} ${what} ${cv.optionMean} on average across ${cv.n} picks from ${span}${third}; ${hit}.${busts}${shrink}`;
 }

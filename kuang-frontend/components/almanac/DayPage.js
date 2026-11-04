@@ -626,10 +626,10 @@ function DraftLedger({ leagueId, pickCurve, onPlayer, compact }) {
           ? [unit, t('Value', '采用值'), t('Avg', '均值'), t('n', '样本'), t('Hit', '命中')]
           : [unit, t('Value used', '采用值'), t('League avg', '联盟均值'), t('Picks', '样本'), t('Hit rate', '命中率'), t('Standard', '标准联盟'), t('Basis', '依据')]}
         rows={rounds.map(([r, v]) => {
-          const base = [<b key="r">{r}</b>, fmt(Math.max(0, v.value), 0), v.mean == null ? '—' : <span key="m" className={v.mean >= 0 ? '' : 'text-violet'}>{fmt(v.mean, 0)}</span>, v.n, v.hitRate == null ? '—' : `${Math.round(v.hitRate * 100)}%`]
+          const base = [<b key="r">{r}</b>, fmt(Math.max(0, v.value), 0), v.optionMean == null ? '—' : <span key="m" title={v.mean != null ? `raw average incl. busts: ${fmt(v.mean, 0)}` : undefined}>{fmt(v.optionMean, 0)}</span>, v.n, v.hitRate == null ? '—' : `${Math.round(v.hitRate * 100)}%`]
           return compact ? base : [...base, fmt(v.prior, 0), <Pill key="b" tone={v.basis === 'league' ? 'jade' : v.basis === 'blend' ? 'amber' : 'neutral'}>{v.basis}</Pill>]
         })}
-        caption={t('Value = rest-of-season points above a free replacement. Hit rate = share of picks that finished above replacement. A pick is an option, so a negative average counts as zero.', '价值 = 高于替补的分数；命中率 = 高于替补的比例；均值为负时按零计。')}
+        caption={t('Value = points above a free replacement. League avg counts busts at zero, because a pick is an option: you keep the hits and drop the rest (hover for the raw average). Hit rate = share that finished above replacement.', '价值 = 高于替补的分数。联盟均值将失败选择按零计（选秀签是期权：留下成功者，放弃其余）。命中率 = 高于替补的比例。')}
       />
       {error && <p className="text-xs text-neon">{error}</p>}
       {!data && !error && <p className="text-xs text-fg-3">{t('Loading every pick…', '正在加载所有选择……')}</p>}

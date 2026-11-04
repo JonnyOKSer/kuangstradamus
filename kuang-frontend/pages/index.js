@@ -229,7 +229,7 @@ function Prophecy({ consultation, latest, contextLabel }) {
             {latest ? <VerdictSeal category={a.category} /> : <VerdictSeal category={a.category} size={44} />}
             <div className="min-w-0">
               <p className="font-display text-2xl leading-tight sm:text-[28px]">{headline}</p>
-              <p className="mt-0.5 text-xs text-fg-2">{verdictLabel(a.category, lang)}{a.winner && a.marginPct ? ` · ${fmt(a.marginPct, 0)}% ${t('more value', '价值差')}` : ''}</p>
+              <p className="mt-0.5 text-xs text-fg-2">{verdictLabel(a.category, lang, a.winner)}{a.winner && a.marginPct ? ` · ${t(`what you ${a.winner === 'B' ? 'get' : 'give'} carries ${fmt(a.marginPct, 0)}% more value`, `你${a.winner === 'B' ? '得到' : '给出'}的价值高出 ${fmt(a.marginPct, 0)}%`)}` : ''}</p>
             </div>
           </div>
 

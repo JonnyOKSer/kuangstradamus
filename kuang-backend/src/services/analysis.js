@@ -244,7 +244,7 @@ function leagueHeader(ctx) {
         seasons: ctx.draft.curve.seasons,
         picks: ctx.draft.curve.picks,
         drafts: ctx.draft.drafts,
-        rounds: Object.fromEntries(Object.entries(ctx.draft.curve.rounds).map(([r, v]) => [r, { value: v.value, mean: v.mean, n: v.n, hitRate: v.hitRate, basis: v.basis, prior: v.prior }])),
+        rounds: Object.fromEntries(Object.entries(ctx.draft.curve.rounds).map(([r, v]) => [r, { value: v.value, mean: v.mean, optionMean: v.optionMean, n: v.n, hitRate: v.hitRate, basis: v.basis, prior: v.prior }])),
       }
       : null,
     dataFreshness: {

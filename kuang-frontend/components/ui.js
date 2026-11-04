@@ -374,6 +374,12 @@ const VERDICT = {
   lopsided: { char: '掠', en: 'Fleecing', zh: '大胜' },
   general: { char: '卜', en: '', zh: '' },
 }
+// The same chop reads both ways, so the label says which way it cuts.
+const VERDICT_DIRECTED = {
+  slight: { you: ['Slight edge to you', '你略占上风'], them: ['Slight edge against you', '你略吃亏'] },
+  clear: { you: ['Clearly in your favor', '明显对你有利'], them: ['Clearly against you', '明显对你不利'] },
+  lopsided: { you: ['You fleece them', '你大赚'], them: ['You get fleeced', '你被宰'] },
+}
 
 /** The verdict chop. Glows: it is the one glowing element on a result. */
 export function VerdictSeal({ category = 'general', size = 56 }) {
@@ -389,7 +395,12 @@ export function VerdictSeal({ category = 'general', size = 56 }) {
     </span>
   )
 }
-export const verdictLabel = (category, lang) => (VERDICT[category] || VERDICT.general)[lang === 'zh' ? 'zh' : 'en']
+export const verdictLabel = (category, lang, winner) => {
+  const i = lang === 'zh' ? 1 : 0
+  const d = VERDICT_DIRECTED[category]
+  if (d && winner) return d[winner === 'B' ? 'you' : 'them'][i]
+  return (VERDICT[category] || VERDICT.general)[lang === 'zh' ? 'zh' : 'en']
+}
 
 export function OddsBar({ pct, glow = false }) {
   if (pct == null) return <span className="text-fg-3">—</span>

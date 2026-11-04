@@ -87,21 +87,24 @@ test('pickValue uses the league curve and explains itself', () => {
   assert.equal(pv.basis, 'league-league');
   assert.equal(pv.seasonsAway, 1);
   assert.ok(pv.value < pv.whenUsed && pv.value > 0);
-  assert.match(pv.league.note, /In this league, 1st-round picks produced 80 value on average across 12 picks/);
+  assert.match(pv.league.note, /In this league, 1st-round picks have been worth 80 on average across 12 picks/);
   const none = pickValue({ round: 1, year: 2027 }, { currentSeason: 2026, leagueType: 'redraft', curve, teams: 12 });
   assert.equal(none.value, 0, 'a future pick scores nothing this season in a redraft league');
   assert.match(describePickBasis(3, { basis: 'prior' }, curve), /no 3rd-round picks on record/);
 });
 
-test('a round whose typical pick is below replacement is worth zero, not negative', () => {
-  const outs = Array.from({ length: 20 }, (_, i) => ({ round: 6, slot: (i % 10) + 1, third: thirdOf((i % 10) + 1, 10), season: 2025, seasonValue: -30, nowValue: 0, draftType: 'auction' }));
+test('a pick is an option: busts count as zero, hits count in full', () => {
+  // half the picks bust badly, half return 40: the raw mean is -30, the option value is 20
+  const outs = Array.from({ length: 20 }, (_, i) => ({ round: 6, slot: (i % 10) + 1, third: thirdOf((i % 10) + 1, 10), season: 2025, seasonValue: i % 2 ? 40 : -100, nowValue: 0, draftType: 'auction' }));
   const curve = buildPickCurve(outs, { prior: { rounds: { 6: { value: 10 } } }, scale: 1, maxRound: 6 });
   assert.equal(curve.auction, true);
+  assert.equal(curve.rounds[6].mean, -30);
+  assert.equal(curve.rounds[6].optionMean, 20);
+  assert.equal(curve.rounds[6].value, Number(((20 * 20 + SHRINK_ROUND * 10) / 28).toFixed(1)));
   const pv = pickValue({ round: 6, year: 2026 }, { currentSeason: 2026, leagueType: 'keeper', curve, teams: 10 });
-  assert.equal(pv.whenUsed, 0);
-  assert.equal(pv.value, 0);
+  assert.equal(pv.whenUsed, curve.rounds[6].value); // no slot given: the whole round
   assert.match(pv.league.note, /6th-tier auction buys/);
-  assert.match(pv.league.note, /counted at zero/);
+  assert.match(pv.league.note, /you keep the hits and drop the rest/);
 });
 
 test('parser understands 1.05 notation and early/mid/late', () => {
