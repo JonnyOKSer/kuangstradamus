@@ -16,13 +16,13 @@ import { rememberLeague, myTeam } from '../lib/memory'
 
 /**
  * The Almanac route. All state is in the query string:
- *   l=LEAGUE  t=ROSTER  view=league|season  open=SLIP  p=PLAYER
+ *   l=LEAGUE  t=ROSTER  view=league|season  open=SLIP  p=PLAYER  ledger=TAB
  * so every view is a link and the back button retraces each step.
  */
 export default function AlmanacRoute() {
   const { t } = useUI()
   const { q, set, ready } = useQueryState()
-  const { l: leagueId, t: rosterId, view, open, p: playerId } = q
+  const { l: leagueId, t: rosterId, view, open, p: playerId, ledger } = q
 
   const [summary, setSummary] = useState(null)
   const [team, setTeam] = useState(null)
@@ -97,7 +97,7 @@ export default function AlmanacRoute() {
   if (!ready) body = null
   else if (!leagueId) body = <Entry onOpen={openLeague} />
   else if (!summary) body = loading ? <p className="font-display text-xl text-fg-3">{t('Importing league…', '正在导入联盟……')}</p> : null
-  else if (rosterId) body = <DayPage summary={summary} team={team} loading={loading === 'team'} open={open} onOpen={setOpen} onPlayer={setPlayer} onLeague={toLeagueView} onSeason={toSeason} leagueId={leagueId} />
+  else if (rosterId) body = <DayPage summary={summary} team={team} loading={loading === 'team'} open={open} onOpen={setOpen} onPlayer={setPlayer} onLeague={toLeagueView} onSeason={toSeason} leagueId={leagueId} ledger={ledger} />
   else if (view === 'season') body = <SeasonLedger summary={summary} season={season} loading={loading === 'season'} onBack={toLeagueView} onTeam={openTeam} />
   else body = <LeaguePage summary={summary} onTeam={openTeam} onSeason={toSeason} onEntry={toEntry} />
 

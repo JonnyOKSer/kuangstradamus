@@ -182,7 +182,7 @@ export function curveValue(curve, { round, slot, third, teams }) {
   return { ...base, value: r.value, third: null, nThird: 0 };
 }
 
-const ordinal = (n) => {
+export const ordinal = (n) => {
   const v = n % 100;
   if (v >= 11 && v <= 13) return `${n}th`;
   return `${n}${({ 1: 'st', 2: 'nd', 3: 'rd' })[n % 10] || 'th'}`;
@@ -197,8 +197,15 @@ export function describePickBasis(round, cv, curve) {
   if (cv.basis === 'prior') return `This league has no ${unit} on record, so the number comes from five seasons of standard leagues.`;
   const hit = cv.hitRate != null ? `${Math.round(cv.hitRate * 100)}% finished above replacement` : '';
   const third = cv.third && cv.nThird ? ` (${cv.third} in the ${curve?.auction ? 'tier' : 'round'}: ${cv.nThird})` : '';
-  const shrink = cv.basis === 'blend' ? ' Blended with the standard-league calibration because the sample is small.' : '';
   const busts = cv.busts ? ` Throwing out the ${cv.busts} complete bust${cv.busts === 1 ? '' : 's'} (injured, cut, or never played), the picks that played averaged ${cv.playedMean}.` : '';
   const option = cv.mean != null && cv.optionMean != null && cv.mean < cv.optionMean - 1 ? ` Valued as an option: hits in full, busts at zero.` : '';
-  return `In this league, ${unit} ${what} ${cv.optionMean} on average across ${cv.n} picks from ${span}${third}; ${hit}.${busts}${option}${shrink}`;
+  // End on the number actually used, and say why it differs from the raw average.
+  const one = curve?.auction ? `a ${ordinal(round)}-tier buy` : `a ${ordinal(round)}-round pick`;
+  const where = cv.third ? ` ${cv.third} in the ${curve?.auction ? 'tier' : 'round'}` : '';
+  const steadied = cv.value != null && cv.optionMean != null && Math.abs(cv.value - cv.optionMean) > 0.5;
+  const used = cv.value == null ? ''
+    : steadied
+      ? ` Steadied toward the standard-league figure of ${cv.prior}${cv.basis === 'blend' ? ' because the sample is small' : ''}, ${one}${where} here is worth ${cv.value}.`
+      : ` So ${one}${where} here is worth ${cv.value}.`;
+  return `In this league, ${unit} ${what} ${cv.optionMean} on average across ${cv.n} picks from ${span}${third}; ${hit}.${busts}${option}${used}`;
 }

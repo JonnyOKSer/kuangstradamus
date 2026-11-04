@@ -8,12 +8,20 @@ import { myTeam, setMyTeam } from '../../lib/memory'
 const DEFAULT_POSITIONS = ['QB', 'RB', 'WR', 'TE', 'K', 'DEF']
 
 /** The heart of the almanac: today's reading, slips, ledger. */
-export default function DayPage({ summary, team, loading, open, onOpen, onPlayer, onLeague, onSeason, leagueId }) {
+export default function DayPage({ summary, team, loading, open, onOpen, onPlayer, onLeague, onSeason, leagueId, ledger }) {
   const { t, lang } = useUI()
-  const [ledgerTab, setLedgerTab] = useState('roster')
-  const [ledgerOpen, setLedgerOpen] = useState(false)
+  const [ledgerTab, setLedgerTab] = useState(ledger || 'roster')
+  const [ledgerOpen, setLedgerOpen] = useState(!!ledger)
   const [week, setWeek] = useState(null)
   const showLedger = (tab) => { setLedgerTab(tab); setLedgerOpen(true); scrollToLedger() }
+
+  // ?ledger=draft (from the Oracle's pick valuation) lands on that ledger tab
+  useEffect(() => {
+    if (!ledger || !team) return
+    setLedgerTab(ledger); setLedgerOpen(true)
+    const id = setTimeout(scrollToLedger, 150)
+    return () => clearTimeout(id)
+  }, [ledger, team])
 
   const L = team?.league || summary?.league
   const POS = L?.activePositions?.length ? L.activePositions : DEFAULT_POSITIONS

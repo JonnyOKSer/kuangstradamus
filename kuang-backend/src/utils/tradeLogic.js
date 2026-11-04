@@ -13,6 +13,7 @@ import {
 } from '../domain/valuation.js';
 import { buildLeagueContext } from '../services/analysis.js';
 import { nextSeasonGross, keepProbability, keepProbabilityOnTeam, combine, detectFormat } from '../domain/horizon.js';
+import { ordinal } from '../domain/draftValue.js';
 
 const r1 = (x) => Number((x ?? 0).toFixed(1));
 
@@ -132,13 +133,15 @@ export async function analyzeTrade(body, options = {}) {
         flags.push({
           type: 'pick',
           level: 'low',
-          text: `Counted at ${pv.value} of its ${pv.whenUsed} value, ${pv.seasonsAway} season${pv.seasonsAway === 1 ? '' : 's'} out in a ${pv.leagueType} league.`,
+          text: `Counted at ${r1(pv.value)} of its ${pv.whenUsed} value, ${pv.seasonsAway} season${pv.seasonsAway === 1 ? '' : 's'} out in a ${pv.leagueType} league.`,
         });
       }
       const picked = lens === 'combined' ? pv.value : pv.h0;
       return {
         type: 'pick',
         name: item.name,
+        round: item.round ?? null,
+        year: item.year ?? null,
         position: 'PICK',
         team: null,
         points: 0,
@@ -264,13 +267,19 @@ export async function analyzeTrade(body, options = {}) {
         ? ` ${winLabel} carries ${marginPct}% more value over replacement.`
         : ' The value gap is inside the noise of the projections.';
     const rosLabel = (arr) => (arr.some((p) => p.type === 'pick') ? 'ROS pts from the players (a pick scores nothing this season)' : 'ROS pts');
+    // A side with several pieces is spelled out piece by piece, so a pick's
+    // share of the total is never hidden inside the sum.
+    const itemized = (arr) => (arr.length > 1 && !belowReplacement ? arr.map((p) => `${p.name} (${r1(p.value)})`).join(' + ') : names(arr));
     const horizonNote = lens === 'combined'
       ? ` Judged on this season plus next (${format.detected} league, next season counted at ${Math.round(w1 * 100)}%). This season alone: ${horizons.thisSeason.A} vs ${horizons.thisSeason.B}, ${verdictWords(thisSeasonVerdict.category, thisSeasonVerdict.winner).toLowerCase()}. Next season: ${horizons.nextSeason.A} vs ${horizons.nextSeason.B}.`
       : '';
-    summary = `You give ${names(sideA)}: ${valueA} value / ${totalA} ${rosLabel(sideA)}. You get ${names(sideB)}: ${valueB} value / ${totalB} ${rosLabel(sideB)}. Verdict: ${verdict}.${detail}${horizonNote}`;
+    const picks = [...sideA, ...sideB].filter((p) => p.type === 'pick');
+    const pickNotes = picks.map((p) => pickSentence(p, { lens, weight: w1, format: format.detected })).join(' ');
+    summary = `You give ${itemized(sideA)}: ${valueA} value / ${totalA} ${rosLabel(sideA)}. You get ${itemized(sideB)}: ${valueB} value / ${totalB} ${rosLabel(sideB)}. Verdict: ${verdict}.${detail}${pickNotes ? ` ${pickNotes}` : ''}${horizonNote}`;
     const zhVerdict = { even: '势均力敌', slight: youGet ? '你得到的略多' : '你给出的略多', clear: youGet ? '你明显占优' : '你明显吃亏', lopsided: youGet ? '你大赚一笔' : '你被狠狠宰了' }[category];
     const zhRos = (arr) => (arr.some((p) => p.type === 'pick') ? '球员剩余赛季预计' : '剩余赛季预计');
-    summaryZh = `你给出 ${names(sideA)}：价值 ${valueA}，${zhRos(sideA)} ${totalA} 分；你得到 ${names(sideB)}：价值 ${valueB}，${zhRos(sideB)} ${totalB} 分。判定：${zhVerdict}。`;
+    const zhPickNotes = picks.map((p) => pickSentenceZh(p, { lens, weight: w1 })).join('');
+    summaryZh = `你给出 ${itemized(sideA)}：价值 ${valueA}，${zhRos(sideA)} ${totalA} 分；你得到 ${itemized(sideB)}：价值 ${valueB}，${zhRos(sideB)} ${totalB} 分。判定：${zhVerdict}。${zhPickNotes}`;
   }
 
   return {
@@ -304,6 +313,46 @@ export async function analyzeTrade(body, options = {}) {
       source: 'Sleeper projections (free public API)',
     },
   };
+}
+
+/**
+ * One plain sentence on what a pick is worth and why: the when-used figure
+ * and where it came from, then how much of it counts given when the pick is
+ * usable. "The 2027 5th round pick is valued at 32.5: 5th-round picks in this
+ * league have returned 54.1 above replacement when used (26 picks, 2025–2026
+ * drafts, 62% hit); one season out in a keeper league, it counts at 60%."
+ */
+function pickSentence(p, { lens, weight }) {
+  const pv = p.pick || {};
+  const round = p.round ? `${ordinal(p.round)}-round pick` : 'pick';
+  const rounds = p.round ? `${ordinal(p.round)}-round picks` : 'picks';
+  const L = pv.league;
+  const span = L?.seasons?.length ? (L.seasons.length === 1 ? `the ${L.seasons[0]} draft` : `the ${L.seasons[0]}–${L.seasons[L.seasons.length - 1]} drafts`) : null;
+  const hit = pv.usefulRate != null ? `, ${Math.round(pv.usefulRate * 100)}% hit` : '';
+  const basis = L
+    ? `${rounds} in this league have returned ${pv.whenUsed} above replacement when used (${L.n} picks${span ? ` from ${span}` : ''}${hit})`
+    : `a ${round} is worth ${pv.whenUsed} above replacement when used (standard-league calibration${hit})`;
+  const away = pv.seasonsAway ?? 0;
+  const share = pv.whenUsed > 0 ? Math.round((pv.value / pv.whenUsed) * 100) : 0;
+  const timing = away === 0
+    ? 'it is usable this season, so it counts in full'
+    : lens === 'combined'
+      ? `${away} season${away === 1 ? '' : 's'} out in a ${pv.leagueType} league, it counts at ${share}%`
+      : 'it cannot score this season, so it counts for nothing in a redraft league';
+  return `The ${p.name} is valued at ${r1(p.value)}: ${basis}; ${timing}.`;
+}
+
+function pickSentenceZh(p, { lens }) {
+  const pv = p.pick || {};
+  const L = pv.league;
+  const hit = pv.usefulRate != null ? `，命中率 ${Math.round(pv.usefulRate * 100)}%` : '';
+  const basis = L
+    ? `本联盟第 ${p.round ?? '?'} 轮签使用时平均高于替补 ${pv.whenUsed}（${L.n} 个样本${hit}）`
+    : `第 ${p.round ?? '?'} 轮签使用时约高于替补 ${pv.whenUsed}（标准联盟校准${hit}）`;
+  const away = pv.seasonsAway ?? 0;
+  const share = pv.whenUsed > 0 ? Math.round((pv.value / pv.whenUsed) * 100) : 0;
+  const timing = away === 0 ? '本季可用，全额计入' : lens === 'combined' ? `距今 ${away} 季，按 ${share}% 计入` : '本季无法得分，重选联盟中不计价值';
+  return `${p.name} 估值 ${r1(p.value)}：${basis}；${timing}。`;
 }
 
 function verdictWords(category, winner) {

@@ -73,6 +73,13 @@ test('a small league sample is shrunk toward the prior; a large one stands on it
   assert.deepEqual(c2.seasons, [2024, 2025]);
   // n = 24 at a mean of 40 against a prior of 100: the prior still counts as eight picks
   assert.equal(c2.rounds[1].value, Number(((24 * 40 + SHRINK_ROUND * 100) / (24 + SHRINK_ROUND)).toFixed(1)));
+
+  // the note ends on the figure actually used and says why it moved off the raw average
+  const bigNote = describePickBasis(1, curveValue(c2, { round: 1 }), c2);
+  assert.match(bigNote, /have been worth 40 on average across 24 picks/);
+  assert.match(bigNote, new RegExp(`Steadied toward the standard-league figure of 100, a 1st-round pick here is worth ${c2.rounds[1].value}\\.$`));
+  const smallNote = describePickBasis(1, curveValue(c, { round: 1 }), c);
+  assert.match(smallNote, /because the sample is small, a 1st-round pick here is worth/);
 });
 
 test('scale converts the PPR prior into the league\'s own points', () => {

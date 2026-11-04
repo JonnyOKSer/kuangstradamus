@@ -68,7 +68,7 @@ export default function Home() {
         if (mine?.rosterId) body.rosterId = String(mine.rosterId)
       } else body.scoring = context
       const data = await api('/api/chat', { method: 'POST', body })
-      setConsultations((prev) => [{ id: nextId++, query: text, reply: data.reply, proverb: data.proverb, analysis: data.analysis, context }, ...prev])
+      setConsultations((prev) => [{ id: nextId++, query: text, reply: data.reply, proverb: data.proverb, analysis: data.analysis, context, leagueId: body.leagueId || null, rosterId: body.rosterId || null }, ...prev])
       rememberConsult({ query: text, category: data.analysis?.category || 'general', context })
       setRecent(recentConsults())
       setInput('')
@@ -196,10 +196,11 @@ function Prophecy({ consultation, latest, contextLabel }) {
   const { t, lang } = useUI()
   const [slip, setSlip] = useState(false)
   const [ledger, setLedger] = useState(false)
-  const { query, reply, proverb, analysis: a = {}, context } = consultation
+  const { query, reply, proverb, analysis: a = {}, context, leagueId, rosterId } = consultation
   const players = a.players || {}
   const give = players.teamA || []
   const get = players.teamB || []
+  const picks = [...give.map((p) => ({ ...p, side: 'give' })), ...get.map((p) => ({ ...p, side: 'get' }))].filter((p) => p.type === 'pick')
 
   const belowReplacement = !a.incomplete && (a.teamAValue ?? 0) <= 0 && (a.teamBValue ?? 0) <= 0
   const giveVal = belowReplacement ? Number(a.teamAPoints) : a.teamAValue
@@ -240,6 +241,8 @@ function Prophecy({ consultation, latest, contextLabel }) {
             <Side label={t('You give', '你给出')} items={give} value={giveVal} peak={peak} points={a.teamAPoints} tone={a.winner === 'A' ? 'violet' : a.winner === 'B' ? 'neutral' : 'neutral'} belowReplacement={belowReplacement} />
             <Side label={t('You get', '你得到')} items={get} value={getVal} peak={peak} points={a.teamBPoints} tone={a.winner === 'B' ? 'jade' : 'neutral'} belowReplacement={belowReplacement} />
           </div>
+
+          {picks.length > 0 && <PickValuation picks={picks} lens={a.lens} format={a.format} leagueId={leagueId} rosterId={rosterId} />}
 
           {a.lens === 'combined' && a.horizons && (
             <div className="mt-3 rounded-[8px] border border-line bg-surface-2 px-3 py-2 text-xs">
@@ -346,10 +349,74 @@ function Side({ label, items, value, peak, points, tone, belowReplacement }) {
         <span className={`nums font-display text-2xl leading-none ${num}`}>{fmt(value)}<span className="ml-1 font-sans text-[10px] text-fg-3">{belowReplacement ? t('pts', '分') : t('value', '价值')}</span></span>
       </div>
       <div className="mt-2 flex flex-wrap gap-1">
-        {items.map((p) => <PlayerChip key={p.id || p.name} player={p.type === 'pick' ? { name: p.name } : p} />)}
+        {items.map((p) => (p.type === 'pick'
+          ? <PickChip key={p.name} pick={p} />
+          : <PlayerChip key={p.id || p.name} player={p} />))}
       </div>
       <div className="mt-2 h-1.5 overflow-hidden rounded-full bg-surface-3"><div className={`h-full rounded-full ${bar}`} style={{ width: `${pct}%` }} /></div>
       <p className="nums mt-1 text-[11px] text-fg-3">{points} {items.some((p) => p.type === 'pick') ? t('rest-of-season pts from the players; a pick scores nothing this season', '球员剩余赛季分；选秀签本季不得分') : t('rest-of-season pts', '剩余赛季分')}</p>
+    </div>
+  )
+}
+
+/** A draft pick in a side card: name plus the value it is counted at. */
+function PickChip({ pick }) {
+  const { t } = useUI()
+  return (
+    <span className="inline-flex max-w-full items-center gap-1.5 rounded-[6px] border border-line bg-surface-2 px-2 py-1 text-left text-[12.5px] leading-none">
+      <span className="han shrink-0 text-[10px] text-neon">选</span>
+      <span className="truncate">{pick.name}</span>
+      <span className="nums shrink-0 text-[10.5px] text-fg-2">{fmt(pick.value)} {t('value', '价值')}</span>
+    </span>
+  )
+}
+
+/**
+ * What each pick in the trade is worth, in the open: the figure used, the
+ * when-used figure it came from, how many of this league's picks back it,
+ * and how much of it counts given when the pick can be used.
+ */
+function PickValuation({ picks, lens, format, leagueId, rosterId }) {
+  const { t } = useUI()
+  const team = rosterId || (leagueId ? myTeam(leagueId)?.rosterId : null)
+  const ledgerHref = leagueId ? href('/league', team ? { l: leagueId, t: String(team), ledger: 'draft' } : { l: leagueId }) : null
+  return (
+    <div className="mt-3 rounded-[8px] border border-line bg-surface-2 px-3 py-2 text-xs">
+      <p className="mb-1 flex items-center gap-1.5 text-[11px] text-fg-2"><span className="han text-neon">选</span>{t('What the pick is worth', '选秀签的价值')}</p>
+      <ul className="divide-y divide-line">
+        {picks.map((p) => {
+          const pv = p.pick || {}
+          const L = pv.league
+          const away = pv.seasonsAway ?? 0
+          const share = pv.whenUsed > 0 ? Math.round((p.value / pv.whenUsed) * 100) : 0
+          const span = L?.seasons?.length ? (L.seasons.length === 1 ? String(L.seasons[0]) : `${L.seasons[0]}–${L.seasons[L.seasons.length - 1]}`) : null
+          const timing = away === 0
+            ? t('usable this season, counted in full', '本季可用，全额计入')
+            : lens === 'combined'
+              ? t(`${away} season${away === 1 ? '' : 's'} out in a ${format?.detected || pv.leagueType} league, counted at ${share}%`, `距今 ${away} 季（${format?.detected || pv.leagueType}），按 ${share}% 计入`)
+              : t('cannot score this season, counted at 0 in a redraft league', '本季无法得分，重选联盟中计 0')
+          return (
+            <li key={`${p.side}-${p.name}`} className="py-1.5">
+              <div className="flex flex-wrap items-baseline justify-between gap-x-3 gap-y-0.5">
+                <span className="font-medium text-fg">{p.name} <span className="font-normal text-fg-3">· {p.side === 'give' ? t('you give', '你给出') : t('you get', '你得到')}</span></span>
+                <span className="nums"><b className="font-display text-base text-fg">{fmt(p.value)}</b> <span className="text-fg-2">{t('value', '价值')}</span></span>
+              </div>
+              <p className="nums mt-0.5 text-fg-2">
+                {t(`Worth ${fmt(pv.whenUsed)} above replacement when used`, `使用时高于替补 ${fmt(pv.whenUsed)}`)}
+                {L ? ` · ${L.n} ${t('picks in this league', '个本联盟样本')}${span ? ` (${span})` : ''}` : ` · ${t('standard-league calibration', '标准联盟校准')}`}
+                {pv.usefulRate != null ? ` · ${Math.round(pv.usefulRate * 100)}% ${t('hit', '命中')}` : ''}
+                {` · ${timing}`}
+              </p>
+              {L?.note && <p className="mt-0.5 text-[11px] leading-relaxed text-fg-3">{L.note}</p>}
+            </li>
+          )
+        })}
+      </ul>
+      {ledgerHref && (
+        <a href={ledgerHref} className="mt-1.5 inline-flex min-h-8 items-center gap-1.5 text-neon hover:opacity-80">
+          <span className="han text-[11px]">籍</span>{t('See every pick in this league\'s draft ledger', '查看本联盟选秀记录')} →
+        </a>
+      )}
     </div>
   )
 }
