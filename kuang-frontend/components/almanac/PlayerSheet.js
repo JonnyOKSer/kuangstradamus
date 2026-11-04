@@ -87,7 +87,7 @@ export default function PlayerSheet({ playerId, team, leagueId, onClose }) {
           {p.trendingAdds ? <p className="nums mt-1 text-xs text-fg-3">{p.trendingAdds.toLocaleString()} {t('adds across Sleeper this week', '本周全平台签入次数')}</p> : null}
 
           <a
-            href={href('/', p.source === 'roster' ? { give: p.name, l: leagueId } : { get: p.name, l: leagueId })}
+            href={href('/', p.source === 'roster' ? { give: p.name, l: leagueId, t: team?.team?.rosterId } : { get: p.name, l: leagueId, t: team?.team?.rosterId })}
             className="mt-5 inline-flex min-h-10 items-center gap-2 rounded-[6px] border border-line px-3 text-sm text-neon hover:border-neon"
           >
             <span className="han">易</span> {t('Ask the Oracle about a trade', '向神谕询问交易')}

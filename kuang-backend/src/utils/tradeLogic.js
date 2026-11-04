@@ -12,6 +12,7 @@ import {
   DEFAULT_ROSTER_POSITIONS, DEFAULT_NUM_TEAMS,
 } from '../domain/valuation.js';
 import { buildLeagueContext } from '../services/analysis.js';
+import { nextSeasonGross, keepProbability, keepProbabilityOnTeam, combine, detectFormat } from '../domain/horizon.js';
 
 const r1 = (x) => Number((x ?? 0).toFixed(1));
 
@@ -47,6 +48,10 @@ async function standaloneContext({ scoring, season, playoffWeeks }) {
     scale: 1,
     curve: null,
     teams: 12,
+    format: detectFormat({ declaredType: 0 }),
+    nextSeason: null,
+    seasonTable: null,
+    rosters: null,
   };
 }
 
@@ -68,6 +73,11 @@ async function leagueContext(leagueId) {
     scale: ctx.scale ?? 1,
     curve: ctx.draft?.curve || null,
     teams: ctx.imported.league.totalRosters || 12,
+    format: ctx.format,
+    nextSeason: ctx.nextSeason,
+    seasonTable: ctx.seasonTable,
+    teams: ctx.imported.league.totalRosters || 12,
+    rosters: ctx.imported.teams,
   };
 }
 
@@ -82,6 +92,21 @@ export async function analyzeTrade(body, options = {}) {
     options.leagueId ? leagueContext(options.leagueId) : standaloneContext(options),
   ]);
   const allPlayers = [...ctx.leaguePts.values()].map((v) => ({ position: v.position, pts: v.total }));
+  // Keeper and dynasty leagues are judged on this season plus next; redraft on this season alone.
+  const format = ctx.format || detectFormat({ declaredType: 0 });
+  const lens = format.detected && format.detected !== 'redraft' ? 'combined' : 'thisSeason';
+  const w1 = lens === 'combined' ? (format.nextSeasonWeight || 0) : 0;
+
+  // The asker's roster, when known, decides whether an incoming player would
+  // actually be one of its keepers. Outgoing players go to a roster we do not
+  // know, so they are judged league-wide.
+  const myRoster = options.rosterId && ctx.rosters ? ctx.rosters.find((t) => String(t.rosterId) === String(options.rosterId)) : null;
+  const outgoingIds = new Set(teamA.filter((i) => i.type === 'player').map((i) => resolve(i.name)?.player?.id).filter(Boolean));
+  const myKeepRank = (playerId, gross) => {
+    if (!myRoster || !ctx.nextSeason) return null;
+    const pool = (myRoster.players || []).map(String).filter((id) => !outgoingIds.has(id) && id !== String(playerId)).map((id) => ctx.nextSeason.gross.get(id) ?? 0);
+    return 1 + pool.filter((g) => g > gross).length;
+  };
 
   const unmatched = [];
   const valueSide = (items, label) => items.map((item) => {
@@ -93,6 +118,7 @@ export async function analyzeTrade(body, options = {}) {
         scale: ctx.scale ?? 1,
         curve: ctx.curve,
         teams: ctx.teams,
+        nextSeasonWeight: w1,
       });
       const flags = [];
       if (pv.league?.note) flags.push({ type: 'pick', level: 'info', text: pv.league.note });
@@ -109,15 +135,17 @@ export async function analyzeTrade(body, options = {}) {
           text: `Counted at ${pv.value} of its ${pv.whenUsed} value, ${pv.seasonsAway} season${pv.seasonsAway === 1 ? '' : 's'} out in a ${pv.leagueType} league.`,
         });
       }
+      const picked = lens === 'combined' ? pv.value : pv.h0;
       return {
         type: 'pick',
         name: item.name,
         position: 'PICK',
         team: null,
         points: 0,
-        value: pv.value,
-        vorp: pv.value,
+        value: picked,
+        vorp: picked,
         rawValue: pv.whenUsed,
+        horizons: { thisSeason: pv.h0, nextSeason: pv.h1, combined: pv.value },
         pick: pv,
         flags,
       };
@@ -134,6 +162,22 @@ export async function analyzeTrade(body, options = {}) {
     const weeksLeft = proj ? Object.keys(proj.byWeek).length : 0;
     const byeWeeks = proj?.byeWeeks ?? [];
     const rank = proj ? positionalRank(total, p.position, allPlayers) : null;
+
+    // next season: this season's full value (to date + ROS) regressed and
+    // aged, times the chance he is kept, net of what keeping him costs
+    const full = ctx.seasonTable?.pts.get(p.id);
+    const fullVorp = full ? playerValue(full.pts, full.position || p.position, ctx.seasonTable.levels).rawVorp : null;
+    const gross = ctx.nextSeason?.gross.get(p.id) ?? nextSeasonGross({ fullSeasonVorp: fullVorp, position: p.position, age: p.age, yearsExp: p.yearsExp });
+    const keepRank = ctx.nextSeason?.rank.get(p.id) ?? null;
+    const teamRank = label === 'B' && gross != null ? myKeepRank(p.id, gross) : null;
+    const kept = teamRank != null
+      ? keepProbabilityOnTeam({ teamRank, keepers: format.keepersPerTeam, format: format.detected })
+      : keepProbability({ rank: keepRank, slots: ctx.nextSeason?.slots, format: format.detected });
+    const cost = format.detected === 'keeper' ? (format.keeperCostValue ?? 0) : 0;
+    const h1 = gross == null ? 0 : Number((kept * Math.max(0, gross - cost)).toFixed(2));
+    const h0 = v.vorp;
+    const combined = combine(h0, h1, w1);
+    const primary = lens === 'combined' ? combined : h0;
     return {
       type: 'player',
       id: p.id,
@@ -143,9 +187,11 @@ export async function analyzeTrade(body, options = {}) {
       team: p.team,
       position: p.position,
       points: v.ros,
-      value: v.vorp,
+      value: primary,
       vorp: v.vorp,
       replacement: v.replacement,
+      horizons: { thisSeason: h0, nextSeason: h1, combined },
+      nextSeason: gross == null ? null : { gross, kept, cost, rank: keepRank, teamRank, onMyRoster: teamRank != null, fullSeasonValue: fullVorp == null ? null : r1(fullVorp), age: p.age ?? null },
       rank: rank ? `${p.position}${rank}` : null,
       byeWeek: byeWeeks[0] ?? null,
       byeWeeks,
@@ -159,10 +205,16 @@ export async function analyzeTrade(body, options = {}) {
   const sideB = valueSide(teamB, 'B');
 
   const sum = (arr, k) => r1(arr.reduce((s, p) => s + (p[k] ?? 0), 0));
+  const hsum = (arr, k) => r1(arr.reduce((s, p) => s + (p.horizons?.[k] ?? 0), 0));
   const totalA = sum(sideA, 'points');
   const totalB = sum(sideB, 'points');
   const valueA = sum(sideA, 'value');
   const valueB = sum(sideB, 'value');
+  const horizons = {
+    thisSeason: { A: hsum(sideA, 'thisSeason'), B: hsum(sideB, 'thisSeason') },
+    nextSeason: { A: hsum(sideA, 'nextSeason'), B: hsum(sideB, 'nextSeason') },
+    combined: { A: hsum(sideA, 'combined'), B: hsum(sideB, 'combined') },
+  };
 
   // VORP floors at zero, so two sides of bench-level players both come out at
   // 0 and would read as "even" however far apart their projections are. When
@@ -178,6 +230,8 @@ export async function analyzeTrade(body, options = {}) {
     { noiseFloor },
   );
 
+  // the same trade judged on this season alone, for the record
+  const thisSeasonVerdict = classifyTrade(horizons.thisSeason.A, horizons.thisSeason.B, { noiseFloor });
   const names = (arr) => arr.map((p) => p.name).join(' + ') || '—';
   // Side A is what the asker gives, side B what they get.
   const label = { A: 'What you give', B: 'What you get' };
@@ -201,13 +255,7 @@ export async function analyzeTrade(body, options = {}) {
   } else {
     const winLabel = winner ? label[winner] : null;
     const youGet = winner === 'B';
-    const verdictText = {
-      even: 'Pretty even trade 🤝',
-      slight: youGet ? 'You get slightly more than you give' : 'You give slightly more than you get',
-      clear: youGet ? 'You get the better end 💪' : 'You give more than you get',
-      lopsided: youGet ? 'You fleece the other side 🏆' : 'You get fleeced',
-    }[category];
-    verdict = verdictText;
+    verdict = verdictWords(category, winner);
     const detail = belowReplacement
       ? (winner
         ? ` Neither side clears replacement level, so this is judged on raw projected points: ${winLabel.toLowerCase()} has ${marginPct}% more.`
@@ -216,7 +264,10 @@ export async function analyzeTrade(body, options = {}) {
         ? ` ${winLabel} carries ${marginPct}% more value over replacement.`
         : ' The value gap is inside the noise of the projections.';
     const rosLabel = (arr) => (arr.some((p) => p.type === 'pick') ? 'ROS pts from the players (a pick scores nothing this season)' : 'ROS pts');
-    summary = `You give ${names(sideA)}: ${valueA} value / ${totalA} ${rosLabel(sideA)}. You get ${names(sideB)}: ${valueB} value / ${totalB} ${rosLabel(sideB)}. Verdict: ${verdict}.${detail}`;
+    const horizonNote = lens === 'combined'
+      ? ` Judged on this season plus next (${format.detected} league, next season counted at ${Math.round(w1 * 100)}%). This season alone: ${horizons.thisSeason.A} vs ${horizons.thisSeason.B}, ${verdictWords(thisSeasonVerdict.category, thisSeasonVerdict.winner).toLowerCase()}. Next season: ${horizons.nextSeason.A} vs ${horizons.nextSeason.B}.`
+      : '';
+    summary = `You give ${names(sideA)}: ${valueA} value / ${totalA} ${rosLabel(sideA)}. You get ${names(sideB)}: ${valueB} value / ${totalB} ${rosLabel(sideB)}. Verdict: ${verdict}.${detail}${horizonNote}`;
     const zhVerdict = { even: '势均力敌', slight: youGet ? '你得到的略多' : '你给出的略多', clear: youGet ? '你明显占优' : '你明显吃亏', lopsided: youGet ? '你大赚一笔' : '你被狠狠宰了' }[category];
     const zhRos = (arr) => (arr.some((p) => p.type === 'pick') ? '球员剩余赛季预计' : '剩余赛季预计');
     summaryZh = `你给出 ${names(sideA)}：价值 ${valueA}，${zhRos(sideA)} ${totalA} 分；你得到 ${names(sideB)}：价值 ${valueB}，${zhRos(sideB)} ${totalB} 分。判定：${zhVerdict}。`;
@@ -231,6 +282,13 @@ export async function analyzeTrade(body, options = {}) {
     marginPct,
     incomplete,
     unmatched,
+    lens,
+    format: { ...format, nextSeasonWeight: w1 },
+    horizons,
+    verdicts: {
+      thisSeason: { ...thisSeasonVerdict, verdict: verdictWords(thisSeasonVerdict.category, thisSeasonVerdict.winner) },
+      combined: lens === 'combined' ? { category, winner, marginPct, verdict } : null,
+    },
     teamAPoints: totalA.toFixed(1),
     teamBPoints: totalB.toFixed(1),
     teamAValue: valueA,
@@ -246,4 +304,14 @@ export async function analyzeTrade(body, options = {}) {
       source: 'Sleeper projections (free public API)',
     },
   };
+}
+
+function verdictWords(category, winner) {
+  const youGet = winner === 'B';
+  return {
+    even: 'Pretty even trade 🤝',
+    slight: youGet ? 'You get slightly more than you give' : 'You give slightly more than you get',
+    clear: youGet ? 'You get the better end 💪' : 'You give more than you get',
+    lopsided: youGet ? 'You fleece the other side 🏆' : 'You get fleeced',
+  }[category] || 'Pretty even trade 🤝';
 }

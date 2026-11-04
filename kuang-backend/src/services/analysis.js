@@ -2,9 +2,10 @@
 // context (import + projections scored with that league's rules + replacement
 // levels) and exposes the report shapes the routes return.
 
-import { importLeague, getTransactions, getDrafts, getDraftPicks, getLeagueChain } from './sleeper/league.js';
+import { importLeague, getTransactions, getDrafts, getDraftPicks, getLeagueChain, getRosters } from './sleeper/league.js';
 import { getSeasonStats } from './sleeper/projections.js';
 import { normalizeDraft, draftOutcomes, buildPickCurve } from '../domain/draftValue.js';
+import { detectFormat, describeFormat, nextSeasonGross } from '../domain/horizon.js';
 import { PICK_VALUES } from '../domain/valuation.js';
 import { scoreStats } from '../domain/scoring.js';
 import PICK_CAL from '../data/pickCalibration.json' with { type: 'json' };
@@ -102,6 +103,21 @@ async function build(leagueId) {
     return null;
   });
 
+  // Full-season value for every player this year (to date + rest of season),
+  // the base for next season's estimate.
+  const seasonTable = draft?.currentTable
+    || (isCurrent ? await buildSeasonTable(imported.state.season, { imported, leaguePts, isCurrent, scoring }).catch(() => null) : null);
+
+  // Keeper or dynasty? Declared settings, cross-checked against what owners
+  // actually carried over, plus how keepers are taken and what they cost.
+  const format = await loadKeeperProfile(imported, draft).catch((err) => {
+    console.warn('⚠️ keeper profile unavailable:', err.message);
+    return detectFormat({ declaredType: imported.league.settingsType, maxKeepers: imported.league.maxKeepers, rosterSize: imported.league.rosterPositions.length, teams: imported.league.totalRosters });
+  });
+
+  // League-wide ranking by next-season value, which is what decides who gets kept.
+  const nextSeason = buildNextSeasonRanks(seasonTable, byId, format, imported.league.totalRosters);
+
   return {
     imported,
     faab,
@@ -118,6 +134,9 @@ async function build(leagueId) {
     // the same thing in a league that scores 30% higher.
     scale,
     draft,
+    seasonTable,
+    format,
+    nextSeason,
     byeByTeam,
     scoringAudit: auditScoring(scoring, projectedKeys),
     scoringDescription: describeScoring(scoring),
@@ -145,20 +164,8 @@ async function loadDraftHistory(imported, { leaguePts, levels, isCurrent, scale,
   const seasons = [...new Set(drafts.map((d) => d.season).filter(Boolean))];
   const tables = new Map();
   for (const season of seasons) {
-    const rows = await getSeasonStats(season).catch(() => []);
-    const pts = new Map();
-    for (const r of rows) pts.set(r.playerId, { position: r.position, pts: scoreStats(r.stats, scoring) });
-    if (isCurrent && String(season) === String(imported.state.season)) {
-      // the current season is still being played: to-date points plus the rest-of-season projection
-      for (const [id, proj] of leaguePts) {
-        const e = pts.get(id) || { position: proj.position, pts: 0 };
-        e.pts += proj.total;
-        pts.set(id, e);
-      }
-    }
-    if (!pts.size) continue;
-    const seasonLevels = computeReplacementLevels({ rosterPositions: league.rosterPositions, numTeams: league.totalRosters, players: [...pts.values()] });
-    tables.set(season, { pts, levels: seasonLevels });
+    const t = await buildSeasonTable(season, { imported, leaguePts, isCurrent, scoring }).catch(() => null);
+    if (t) tables.set(season, t);
   }
 
   const valueOf = (playerId, season, position) => {
@@ -192,7 +199,86 @@ async function loadDraftHistory(imported, { leaguePts, levels, isCurrent, scale,
     outcomes,
     drafts: drafts.map(({ picks, ...d }) => ({ ...d, picks: picks.length })),
     seasons: chain.map((c) => c.season),
+    currentTable: tables.get(Number(imported.state.season)) || null,
   };
+}
+
+/** Season points in this league's scoring for every player, with that season's replacement levels. */
+async function buildSeasonTable(season, { imported, leaguePts, isCurrent, scoring }) {
+  const rows = await getSeasonStats(season);
+  const pts = new Map();
+  for (const r of rows) pts.set(r.playerId, { position: r.position, pts: scoreStats(r.stats, scoring) });
+  if (isCurrent && String(season) === String(imported.state.season)) {
+    // the current season is still being played: to-date points plus the rest-of-season projection
+    for (const [id, proj] of leaguePts) {
+      const e = pts.get(id) || { position: proj.position, pts: 0 };
+      e.pts += proj.total;
+      pts.set(id, e);
+    }
+  }
+  if (!pts.size) return null;
+  const levels = computeReplacementLevels({ rosterPositions: imported.league.rosterPositions, numTeams: imported.league.totalRosters, players: [...pts.values()] });
+  return { season: Number(season), pts, levels };
+}
+
+/**
+ * Keeper or dynasty, and how keepers work here. Compares this season's rosters
+ * to last season's end-of-season rosters owner by owner; a player who stayed
+ * with his owner and was not re-selected in this year's draft was held as a
+ * keeper, one who stayed and WAS re-selected was kept at the cost of a round.
+ */
+async function loadKeeperProfile(imported, draft) {
+  const league = imported.league;
+  const base = { declaredType: league.settingsType, maxKeepers: league.maxKeepers, rosterSize: league.rosterPositions.length, teams: league.totalRosters };
+  if (!league.previousLeagueId) return { ...detectFormat(base), keeperCostValue: null, keeperCostRound: null, sample: 0 };
+
+  const prevRosters = (await getRosters(league.previousLeagueId)) || [];
+  const prevByOwner = new Map(prevRosters.map((r) => [r.owner_id, new Set((r.players || []).map(String))]));
+  const thisSeason = Number(imported.state.season);
+  const draftedThisSeason = new Map((draft?.outcomes || []).filter((o) => o.season === thisSeason).map((o) => [o.playerId, o]));
+
+  let carried = 0;
+  let held = 0;
+  let returning = 0;
+  const costRounds = [];
+  for (const t of imported.teams) {
+    const prev = prevByOwner.get(t.ownerId);
+    if (!prev) continue;
+    returning++;
+    for (const id of (t.players || []).map(String)) {
+      if (!prev.has(id)) continue;
+      carried++;
+      const pick = draftedThisSeason.get(id);
+      if (pick) costRounds.push(pick.round);
+      else held++;
+    }
+  }
+  const format = detectFormat({ ...base, carryPerTeam: returning ? carried / returning : null, keptPerTeam: returning ? held / returning : null });
+  let keeperCostValue = null;
+  let keeperCostRound = null;
+  if (format.mechanism === 'drafted' && costRounds.length && draft?.curve) {
+    keeperCostRound = Number((costRounds.reduce((a, b) => a + b, 0) / costRounds.length).toFixed(1));
+    const vals = costRounds.map((r) => draft.curve.rounds[r]?.value).filter((v) => v != null);
+    if (vals.length) keeperCostValue = Number((vals.reduce((a, b) => a + b, 0) / vals.length).toFixed(1));
+  }
+  const profile = { ...format, keeperCostValue, keeperCostRound, sample: returning };
+  return { ...profile, description: describeFormat(profile) };
+}
+
+/** Every player's gross next-season value and league-wide rank by it. */
+function buildNextSeasonRanks(seasonTable, byId, format, teams) {
+  const gross = new Map();
+  if (seasonTable) {
+    for (const [id, e] of seasonTable.pts) {
+      const p = byId.get(id);
+      const v = playerValue(e.pts, e.position, seasonTable.levels).rawVorp;
+      const g = nextSeasonGross({ fullSeasonVorp: v, position: e.position, age: p?.age, yearsExp: p?.yearsExp });
+      if (g != null) gross.set(id, g);
+    }
+  }
+  const order = [...gross.entries()].sort((a, b) => b[1] - a[1]);
+  const rank = new Map(order.map(([id], i) => [id, i + 1]));
+  return { gross, rank, slots: (format?.keepersPerTeam || 0) * (teams || 0) };
 }
 
 async function loadBidHistory(imported, leaguePts, levels) {
@@ -245,6 +331,7 @@ function leagueHeader(ctx) {
       ? { budget: ctx.faab.budget, claimsSeen: ctx.faab.claimsSeen, wonSeen: ctx.faab.wonSeen, enabled: true }
       : { enabled: false },
     bonusCalibration: calibrationInfo(),
+    format: ctx.format ? { ...ctx.format, description: ctx.format.description || describeFormat(ctx.format) } : null,
     pickCurve: ctx.draft
       ? {
         measure: ctx.draft.measure,

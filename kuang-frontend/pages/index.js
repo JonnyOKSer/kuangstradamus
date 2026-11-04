@@ -10,7 +10,7 @@ import { Button, Card, DataTable, Note, PlayerChip, SectionTitle, VerdictSeal, v
 import { api, fmt } from '../lib/api'
 import { useUI } from '../lib/ui'
 import { useQueryState, href } from '../lib/url'
-import { recentConsults, rememberConsult, clearConsults } from '../lib/memory'
+import { recentConsults, rememberConsult, clearConsults, myTeam } from '../lib/memory'
 
 const SCORING = [
   { value: 'ppr', en: 'PPR', zh: '每次接球 1 分' },
@@ -62,8 +62,11 @@ export default function Home() {
     setError('')
     try {
       const body = { message: text, lang }
-      if (context.startsWith('league:')) body.leagueId = context.slice(7)
-      else body.scoring = context
+      if (context.startsWith('league:')) {
+        body.leagueId = context.slice(7)
+        const mine = (q.t && q.l === body.leagueId) ? { rosterId: q.t } : myTeam(body.leagueId)
+        if (mine?.rosterId) body.rosterId = String(mine.rosterId)
+      } else body.scoring = context
       const data = await api('/api/chat', { method: 'POST', body })
       setConsultations((prev) => [{ id: nextId++, query: text, reply: data.reply, proverb: data.proverb, analysis: data.analysis, context }, ...prev])
       rememberConsult({ query: text, category: data.analysis?.category || 'general', context })
@@ -238,6 +241,29 @@ function Prophecy({ consultation, latest, contextLabel }) {
             <Side label={t('You get', '你得到')} items={get} value={getVal} peak={peak} points={a.teamBPoints} tone={a.winner === 'B' ? 'jade' : 'neutral'} belowReplacement={belowReplacement} />
           </div>
 
+          {a.lens === 'combined' && a.horizons && (
+            <div className="mt-3 rounded-[8px] border border-line bg-surface-2 px-3 py-2 text-xs">
+              <div className="grid grid-cols-[1fr_auto_auto] gap-x-5 gap-y-1">
+                <span />
+                <span className="text-right text-fg-2">{t('You give', '你给出')}</span>
+                <span className="text-right text-fg-2">{t('You get', '你得到')}</span>
+                <span>{t('This season', '本赛季')}</span>
+                <span className="nums text-right">{fmt(a.horizons.thisSeason.A)}</span>
+                <span className="nums text-right">{fmt(a.horizons.thisSeason.B)}</span>
+                <span>{t(`Next season, counted at ${Math.round((a.format?.nextSeasonWeight || 0) * 100)}%`, `下赛季（按 ${Math.round((a.format?.nextSeasonWeight || 0) * 100)}% 计）`)}</span>
+                <span className="nums text-right">{fmt(a.horizons.nextSeason.A)}</span>
+                <span className="nums text-right">{fmt(a.horizons.nextSeason.B)}</span>
+                <span className="font-medium text-fg">{t('Both seasons', '两季合计')}</span>
+                <span className="nums text-right font-medium text-fg">{fmt(a.horizons.combined.A)}</span>
+                <span className="nums text-right font-medium text-fg">{fmt(a.horizons.combined.B)}</span>
+              </div>
+              {a.verdicts?.thisSeason && a.verdicts.thisSeason.category !== a.category && (
+                <p className="mt-1.5 text-fg-2">{t('This season alone:', '仅看本赛季：')} {a.verdicts.thisSeason.verdict}</p>
+              )}
+              {a.format?.description && <p className="mt-1.5 text-[11px] text-fg-3">{a.format.description}</p>}
+            </div>
+          )}
+
           <p className="mt-3 text-sm leading-relaxed text-fg-2">{reply}</p>
         </>
       )}
@@ -276,6 +302,12 @@ function Prophecy({ consultation, latest, contextLabel }) {
                       ? <>{t(`counted at ${fmt(p.value)} of ${fmt(p.rawValue)} when used`, `按 ${fmt(p.value)} 计（使用时 ${fmt(p.rawValue)}）`)}{p.pick?.league ? ` · ${t('from this league\'s drafts', '依据本联盟选秀')} (${p.pick.league.n})` : ` · ${t('standard-league calibration', '标准联盟校准')}`}</>
                       : <>{fmt(p.points)} {t('ROS pts', '剩余分')}{p.rank ? ` · ${p.rank}` : ''}{p.byeWeek ? ` · ${t('bye', '轮空')} ${p.byeWeek}` : ''}</>}
                   </p>
+                  {p.horizons && a.lens === 'combined' && (
+                    <p className="nums mt-0.5 text-xs text-fg-2">
+                      {t('this season', '本赛季')} {fmt(p.horizons.thisSeason)} · {t('next season', '下赛季')} {fmt(p.horizons.nextSeason)}
+                      {p.nextSeason?.kept != null && p.type !== 'pick' ? ` (${t('kept', '保留概率')} ${Math.round(p.nextSeason.kept * 100)}%${p.nextSeason.onMyRoster ? t(' on your roster', '，以你的阵容计') : ''}${p.nextSeason.cost ? `, ${t('cost', '成本')} ${fmt(p.nextSeason.cost, 0)}` : ''})` : ''}
+                    </p>
+                  )}
                   {p.flags?.length > 0 && <p className={`mt-0.5 text-xs ${p.flags.every((f) => f.level === 'info' || f.level === 'low') ? 'text-fg-2' : 'text-amber'}`}>{p.flags.map((f) => f.text).join(' · ')}</p>}
                 </li>
               ))}

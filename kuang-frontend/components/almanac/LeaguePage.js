@@ -39,6 +39,7 @@ export default function LeaguePage({ summary, onTeam, onSeason, onEntry }) {
             {t(`Playoffs: ${L.playoffTeams} teams from week ${L.playoffWeekStart}`, `季后赛：第 ${L.playoffWeekStart} 周起，${L.playoffTeams} 队`)}
             {L.scoringAudit && <> · {t(`${L.scoringAudit.totalRules} scoring rules applied`, `已应用 ${L.scoringAudit.totalRules} 条计分规则`)}{L.scoringAudit.unscoredCount > 0 && t(`, ${L.scoringAudit.unscoredCount} unforecastable`, `，${L.scoringAudit.unscoredCount} 条无法预测`)}</>}
           </p>
+          {L.format?.description && <p className="mt-1 text-xs text-fg-2"><span className="han text-neon">制</span> {L.format.description}</p>}
         </div>
         <div className="flex w-full gap-2 sm:w-auto">
           <Button variant="quiet" className="min-h-9 px-3" onClick={onEntry}>← {t('Leagues', '联盟列表')}</Button>

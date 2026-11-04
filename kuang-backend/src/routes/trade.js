@@ -11,8 +11,8 @@ const router = express.Router();
 // POST /api/trade  { message } | { teamA: [...], teamB: [...] }  + optional scoring / leagueId / season
 router.post('/trade', async (req, res) => {
   try {
-    const { scoring, leagueId, season } = req.body || {};
-    const result = await analyzeTrade(req.body, { scoring, leagueId, season });
+    const { scoring, leagueId, season, rosterId } = req.body || {};
+    const result = await analyzeTrade(req.body, { scoring, leagueId, season, rosterId });
     res.json(result);
   } catch (err) {
     sendError(res, err, 'trade');

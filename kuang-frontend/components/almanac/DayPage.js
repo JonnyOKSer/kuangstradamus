@@ -39,7 +39,7 @@ export default function DayPage({ summary, team, loading, open, onOpen, onPlayer
   const { lineup, waivers, keyDates: dates, tradeTargets, tradeWindow } = team
   const hexRows = POS.map((p) => ({ pos: p, v: team.positionalStrength?.[p]?.vsAverage ?? null }))
   const glances = buildGlances({ team, row, t })
-  const askHref = (give, get) => href('/', { give, get, l: leagueId })
+  const askHref = (give, get) => href('/', { give, get, l: leagueId, t: team.team.rosterId })
 
   const weekInfo = week ? dates?.byeOutlook?.find((b) => b.week === week) : null
 
@@ -581,6 +581,7 @@ function LedgerBlock({ team, tab, onTab, onPlayer, compact = false, leagueId }) 
         <div className="space-y-3 text-xs text-fg-2">
           <p><b className="text-fg">{t('Scoring.', '计分。')}</b> {L?.scoringDescription}. {L?.scoringAudit && t(`${L.scoringAudit.totalRules} rules applied to every projection${L.scoringAudit.unscoredCount ? `; ${L.scoringAudit.unscoredCount} rare special-teams rules cannot be forecast and count as zero` : ''}.`, `已对每份预测应用 ${L.scoringAudit.totalRules} 条规则${L.scoringAudit.unscoredCount ? `；${L.scoringAudit.unscoredCount} 条罕见特勤组规则无法预测，按零计` : ''}。`)}</p>
           {L?.bonusCalibration && <p><b className="text-fg">{t('Bonuses.', '奖励分。')}</b> {t(`Milestone bonuses and defence tiers are expected values measured from ${L.bonusCalibration.sampleSize.toLocaleString()} player-weeks (${L.bonusCalibration.seasons.join(', ')}).`, `里程碑奖励与防守分段为基于 ${L.bonusCalibration.sampleSize.toLocaleString()} 个球员周实测的期望值。`)}</p>}
+          {L?.format?.description && <p><b className="text-fg">{t('Format.', '联盟类型。')}</b> {L.format.description}. {t('Trades in keeper and dynasty leagues are judged on this season plus next; next season is this season\'s full value regressed, aged by position, weighted by the chance a player is kept and net of the keeper cost.', '保留与王朝联盟的交易按本赛季加下赛季评估。')}</p>}
           <p><b className="text-fg">{t('Gates.', '关卡。')}</b> {t('Availability, weather and matchup adjust a projection; role, form and game script are shown as context because a two-season backtest found the published projection already prices them in.', '可用性、天气与对位会调整预测；角色、状态与比赛走向仅作参考，因为两个赛季的回测显示预测已包含这些因素。')}</p>
           {faab && <p><b className="text-fg">FAAB.</b> {t(`Estimates come from the ${faab.wonSeen} winning bids in this league this season (budget $${faab.budget}), matched by where each target ranks among free agents available now. Early-season bidding runs hot.`, `估价来自本季联盟 ${faab.wonSeen} 次成交出价（预算 $${faab.budget}）。赛季初出价偏高。`)}</p>}
           <p><b className="text-fg">{t('Value.', '价值。')}</b> {t('Rest-of-season points above a free replacement at the position, with replacement level derived from this league\'s roster slots and team count.', '剩余赛季高于同位置可免费获得的替补的分数；替补水平由本联盟的阵容位与队数推算。')}</p>

@@ -30,7 +30,7 @@ export const PICK_VALUES = { 1: 116, 2: 81, 3: 62, 4: 41, 5: 41, 6: 35, 7: 29, 8
 // scores no points for the roster you are fielding now — so the analyzer
 // reports it separately rather than folding a discounted guess into the
 // headline. Keeper and dynasty leagues carry the asset forward.
-export const FUTURE_PICK_WEIGHT = { redraft: 0, keeper: 0.5, dynasty: 0.85 };
+export const FUTURE_PICK_WEIGHT = { redraft: 0, keeper: 0.6, dynasty: 0.85 };
 export const LEAGUE_TYPES = { 0: 'redraft', 1: 'keeper', 2: 'dynasty' };
 
 export function starterSlots(rosterPositions) {
@@ -160,6 +160,7 @@ export function pickValue(pick, {
   scale = 1,
   curve = null,      // this league's own draft history (domain/draftValue.js), when available
   teams = 12,
+  nextSeasonWeight = null,
 } = {}) {
   const round = Number(pick?.round) || 0;
   const fromCurve = curve ? curveValue(curve, { round, slot: pick?.slot, third: pick?.third, teams }) : null;
@@ -169,10 +170,16 @@ export function pickValue(pick, {
   const whenUsed = Math.max(0, Number((fromCurve ? fromCurve.value : (measured ?? PICK_VALUES[round] ?? 0) * scale).toFixed(2)));
 
   const seasonsAway = currentSeason && pick?.year ? Math.max(0, Number(pick.year) - Number(currentSeason)) : 0;
-  const weight = seasonsAway === 0 ? 1 : (FUTURE_PICK_WEIGHT[leagueType] ?? 0) ** seasonsAway;
+  const w = nextSeasonWeight ?? FUTURE_PICK_WEIGHT[leagueType] ?? 0;
+  // this season: only a pick that can still be used this year; next season: a
+  // pick one year out in full, further out discounted once per extra year
+  const h0 = seasonsAway === 0 ? whenUsed : 0;
+  const h1 = seasonsAway === 1 ? whenUsed : seasonsAway >= 2 ? Number((whenUsed * w ** (seasonsAway - 1)).toFixed(2)) : 0;
 
   return {
-    value: Number((whenUsed * weight).toFixed(2)),
+    value: Number((h0 + w * h1).toFixed(2)),
+    h0,
+    h1,
     whenUsed,
     seasonsAway,
     leagueType,
