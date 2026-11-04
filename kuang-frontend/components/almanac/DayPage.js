@@ -622,11 +622,13 @@ function DraftLedger({ leagueId, pickCurve, onPlayer, compact }) {
       </p>
       <DataTable
         dense
-        head={[unit, t('Value used', '采用值'), t('League avg', '联盟均值'), t('Picks', '样本'), t('Hit rate', '命中率'), t('Standard', '标准联盟'), t('Basis', '依据')]}
-        rows={rounds.map(([r, v]) => [
-          <b key="r">{r}</b>, fmt(Math.max(0, v.value), 0), v.mean == null ? '—' : <span key="m" className={v.mean >= 0 ? '' : 'text-violet'}>{fmt(v.mean, 0)}</span>, v.n, v.hitRate == null ? '—' : `${Math.round(v.hitRate * 100)}%`, fmt(v.prior, 0),
-          <Pill key="b" tone={v.basis === 'league' ? 'jade' : v.basis === 'blend' ? 'amber' : 'neutral'}>{v.basis}</Pill>,
-        ])}
+        head={compact
+          ? [unit, t('Value', '采用值'), t('Avg', '均值'), t('n', '样本'), t('Hit', '命中')]
+          : [unit, t('Value used', '采用值'), t('League avg', '联盟均值'), t('Picks', '样本'), t('Hit rate', '命中率'), t('Standard', '标准联盟'), t('Basis', '依据')]}
+        rows={rounds.map(([r, v]) => {
+          const base = [<b key="r">{r}</b>, fmt(Math.max(0, v.value), 0), v.mean == null ? '—' : <span key="m" className={v.mean >= 0 ? '' : 'text-violet'}>{fmt(v.mean, 0)}</span>, v.n, v.hitRate == null ? '—' : `${Math.round(v.hitRate * 100)}%`]
+          return compact ? base : [...base, fmt(v.prior, 0), <Pill key="b" tone={v.basis === 'league' ? 'jade' : v.basis === 'blend' ? 'amber' : 'neutral'}>{v.basis}</Pill>]
+        })}
         caption={t('Value = rest-of-season points above a free replacement. Hit rate = share of picks that finished above replacement. A pick is an option, so a negative average counts as zero.', '价值 = 高于替补的分数；命中率 = 高于替补的比例；均值为负时按零计。')}
       />
       {error && <p className="text-xs text-neon">{error}</p>}
@@ -643,7 +645,7 @@ function DraftLedger({ leagueId, pickCurve, onPlayer, compact }) {
                 dense
                 head={[auction ? '$' : t('Pick', '签位'), t('Player', '球员'), t('Pos', '位置'), t('That season', '当季'), t('Now', '现在')]}
                 rows={picks.slice(0, compact ? 40 : 200).map((o) => [
-                  auction ? <span key="a" className="nums">{o.round}.{String(o.slot).padStart(2, '0')} · ${o.amount}</span> : <span key="a" className="nums">{o.round}.{String(o.slot).padStart(2, '0')}</span>,
+                  auction ? <span key="a" className="nums whitespace-nowrap">{o.round}.{String(o.slot).padStart(2, '0')} · ${o.amount}</span> : <span key="a" className="nums whitespace-nowrap">{o.round}.{String(o.slot).padStart(2, '0')}</span>,
                   <button key="n" type="button" onClick={() => onPlayer(o.playerId)} className="text-left hover:text-neon">{o.name}</button>,
                   o.position || '—',
                   <span key="s" className={`nums ${o.seasonValue > 0 ? 'text-jade' : o.seasonValue < 0 ? 'text-violet' : ''}`}>{o.seasonValue == null ? '—' : `${o.seasonValue > 0 ? '+' : ''}${fmt(o.seasonValue, 0)}`}</span>,
