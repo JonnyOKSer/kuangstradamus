@@ -164,15 +164,22 @@ async function loadDraftHistory(imported, { leaguePts, levels, isCurrent, scale,
   const valueOf = (playerId, season, position) => {
     const t = tables.get(season);
     let seasonValue = null;
+    let seasonPts = null;
+    let replacement = null;
     if (t) {
       const e = t.pts.get(String(playerId));
       const pos = e?.position || position;
       // drafted but never produced: a zero season, not a missing one
-      seasonValue = pos ? playerValue(e?.pts ?? 0, pos, t.levels).rawVorp : null;
+      if (pos) {
+        const v = playerValue(e?.pts ?? 0, pos, t.levels);
+        seasonValue = v.rawVorp;
+        seasonPts = v.ros;
+        replacement = v.replacement;
+      }
     }
     const now = leaguePts.get(String(playerId));
     const nowValue = now ? playerValue(now.total, now.position, levels).rawVorp : null;
-    return { season: seasonValue, now: nowValue };
+    return { season: seasonValue, now: nowValue, seasonPts, replacement };
   };
 
   const outcomes = draftOutcomes(drafts, valueOf);
@@ -244,7 +251,7 @@ function leagueHeader(ctx) {
         seasons: ctx.draft.curve.seasons,
         picks: ctx.draft.curve.picks,
         drafts: ctx.draft.drafts,
-        rounds: Object.fromEntries(Object.entries(ctx.draft.curve.rounds).map(([r, v]) => [r, { value: v.value, mean: v.mean, optionMean: v.optionMean, n: v.n, hitRate: v.hitRate, basis: v.basis, prior: v.prior }])),
+        rounds: Object.fromEntries(Object.entries(ctx.draft.curve.rounds).map(([r, v]) => [r, { value: v.value, mean: v.mean, optionMean: v.optionMean, playedMean: v.playedMean, busts: v.busts, n: v.n, hitRate: v.hitRate, basis: v.basis, prior: v.prior }])),
       }
       : null,
     dataFreshness: {

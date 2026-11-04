@@ -623,13 +623,16 @@ function DraftLedger({ leagueId, pickCurve, onPlayer, compact }) {
       <DataTable
         dense
         head={compact
-          ? [unit, t('Value', '采用值'), t('Avg', '均值'), t('n', '样本'), t('Hit', '命中')]
-          : [unit, t('Value used', '采用值'), t('League avg', '联盟均值'), t('Picks', '样本'), t('Hit rate', '命中率'), t('Standard', '标准联盟'), t('Basis', '依据')]}
+          ? [unit, t('Value', '采用值'), t('Avg played', '出场均值'), t('Busts', '报废'), t('Hit', '命中')]
+          : [unit, t('Value used', '采用值'), t('Avg when played', '出场均值'), t('Busts', '报废'), t('Picks', '样本'), t('Hit rate', '命中率'), t('Standard', '标准联盟'), t('Basis', '依据')]}
         rows={rounds.map(([r, v]) => {
-          const base = [<b key="r">{r}</b>, fmt(Math.max(0, v.value), 0), v.optionMean == null ? '—' : <span key="m" title={v.mean != null ? `raw average incl. busts: ${fmt(v.mean, 0)}` : undefined}>{fmt(v.optionMean, 0)}</span>, v.n, v.hitRate == null ? '—' : `${Math.round(v.hitRate * 100)}%`]
-          return compact ? base : [...base, fmt(v.prior, 0), <Pill key="b" tone={v.basis === 'league' ? 'jade' : v.basis === 'blend' ? 'amber' : 'neutral'}>{v.basis}</Pill>]
+          const avg = v.playedMean == null ? '—' : <span key="m" title={v.mean != null ? `all picks incl. busts: ${fmt(v.mean, 0)} · busts at zero: ${fmt(v.optionMean, 0)}` : undefined} className={v.playedMean >= 0 ? '' : 'text-violet'}>{fmt(v.playedMean, 0)}</span>
+          const hit = v.hitRate == null ? '—' : `${Math.round(v.hitRate * 100)}%`
+          return compact
+            ? [<b key="r">{r}</b>, fmt(Math.max(0, v.value), 0), avg, v.busts || '—', hit]
+            : [<b key="r">{r}</b>, fmt(Math.max(0, v.value), 0), avg, v.busts || '—', v.n, hit, fmt(v.prior, 0), <Pill key="b" tone={v.basis === 'league' ? 'jade' : v.basis === 'blend' ? 'amber' : 'neutral'}>{v.basis}</Pill>]
         })}
-        caption={t('Value = points above a free replacement. League avg counts busts at zero, because a pick is an option: you keep the hits and drop the rest (hover for the raw average). Hit rate = share that finished above replacement.', '价值 = 高于替补的分数。联盟均值将失败选择按零计（选秀签是期权：留下成功者，放弃其余）。命中率 = 高于替补的比例。')}
+        caption={t('Value = points above a free replacement. "Avg when played" throws out complete busts (under a tenth of replacement: injured, cut, never played). The value used counts those busts at zero, because a pick is an option: you keep the hits and drop the rest. Hover an average for the other versions.', '价值 = 高于替补的分数。"出场均值" 剔除完全报废的选择（产出不足替补的十分之一）。采用值将报废按零计，因为选秀签是期权。')}
       />
       {error && <p className="text-xs text-neon">{error}</p>}
       {!data && !error && <p className="text-xs text-fg-3">{t('Loading every pick…', '正在加载所有选择……')}</p>}
@@ -643,13 +646,14 @@ function DraftLedger({ leagueId, pickCurve, onPlayer, compact }) {
             <div className="mt-2">
               <DataTable
                 dense
-                head={[auction ? '$' : t('Pick', '签位'), t('Player', '球员'), t('Pos', '位置'), t('That season', '当季'), t('Now', '现在')]}
+                head={[auction ? '$' : t('Pick', '签位'), t('Player', '球员'), t('Pos', '位置'), t('That season', '当季'), t('Now', '现在'), '']}
                 rows={picks.slice(0, compact ? 40 : 200).map((o) => [
                   auction ? <span key="a" className="nums whitespace-nowrap">{o.round}.{String(o.slot).padStart(2, '0')} · ${o.amount}</span> : <span key="a" className="nums whitespace-nowrap">{o.round}.{String(o.slot).padStart(2, '0')}</span>,
                   <button key="n" type="button" onClick={() => onPlayer(o.playerId)} className="text-left hover:text-neon">{o.name}</button>,
                   o.position || '—',
                   <span key="s" className={`nums ${o.seasonValue > 0 ? 'text-jade' : o.seasonValue < 0 ? 'text-violet' : ''}`}>{o.seasonValue == null ? '—' : `${o.seasonValue > 0 ? '+' : ''}${fmt(o.seasonValue, 0)}`}</span>,
                   <span key="w" className={`nums ${o.nowValue > 0 ? 'text-jade' : o.nowValue < 0 ? 'text-violet' : ''}`}>{o.nowValue == null ? '—' : `${o.nowValue > 0 ? '+' : ''}${fmt(o.nowValue, 0)}`}</span>,
+                  o.bust ? <Pill key="b" tone="violet">{t('bust', '报废')}</Pill> : null,
                 ])}
               />
               {picks.length > (compact ? 40 : 200) && <p className="mt-1 text-xs text-fg-3">{t(`Showing the first ${compact ? 40 : 200}.`, `仅显示前 ${compact ? 40 : 200} 个。`)}</p>}

@@ -30,14 +30,28 @@ test('auction drafts are tiered by price, one pick per team per tier, keepers ex
   assert.deepEqual(d.picks.map((p) => [p.amount, p.round, p.slot]), [[84, 1, 1], [60, 1, 2], [40, 2, 1], [12, 2, 2], [3, 3, 1]]);
 });
 
-test('outcomes carry both measures and the third of the round', () => {
+test('outcomes carry both measures, the third of the round, and whether the pick was a complete bust', () => {
   const d = normalizeDraft({ draft_id: 'd', type: 'snake', season: '2025', settings: { teams: 12 } }, [{ ...pick(1), draft_slot: 2 }, { ...pick(2), draft_slot: 11 }]);
-  const out = draftOutcomes([d], (id) => ({ season: id === '101' ? 50 : -10, now: 20 }));
+  const out = draftOutcomes([d], (id) => (id === '101' ? { season: 50, now: 20, seasonPts: 150, replacement: 100 } : { season: -97, now: 20, seasonPts: 3, replacement: 100 }));
   assert.equal(out[0].third, 'early');
   assert.equal(out[1].third, 'late');
   assert.equal(out[0].seasonValue, 50);
-  assert.equal(out[1].nowValue, 20);
+  assert.equal(out[0].bust, false);
+  assert.equal(out[1].bust, true, 'three points against a replacement of 100 is a complete bust');
   assert.equal(thirdOf(5, 12), 'mid');
+});
+
+test('the played average throws complete busts out; the option value still counts them at zero', () => {
+  const outs = [
+    ...Array.from({ length: 6 }, (_, i) => ({ round: 2, slot: i + 1, third: thirdOf(i + 1, 10), season: 2025, seasonValue: 30, nowValue: 0, bust: false })),
+    ...Array.from({ length: 2 }, (_, i) => ({ round: 2, slot: 7 + i, third: thirdOf(7 + i, 10), season: 2025, seasonValue: -90, nowValue: 0, bust: true })),
+  ];
+  const c = buildPickCurve(outs, { prior: { rounds: { 2: { value: 30 } } }, scale: 1, maxRound: 2 });
+  assert.equal(c.rounds[2].busts, 2);
+  assert.equal(c.rounds[2].playedMean, 30);
+  assert.equal(c.rounds[2].mean, 0);
+  assert.equal(c.rounds[2].optionMean, 22.5); // 6 × 30 / 8
+  assert.match(describePickBasis(2, curveValue(c, { round: 2 }), c), /Throwing out the 2 complete busts/);
 });
 
 const PRIOR = { rounds: { 1: { value: 100, usefulRate: 0.9 }, 2: { value: 60, usefulRate: 0.7 } } };
@@ -104,7 +118,7 @@ test('a pick is an option: busts count as zero, hits count in full', () => {
   const pv = pickValue({ round: 6, year: 2026 }, { currentSeason: 2026, leagueType: 'keeper', curve, teams: 10 });
   assert.equal(pv.whenUsed, curve.rounds[6].value); // no slot given: the whole round
   assert.match(pv.league.note, /6th-tier auction buys/);
-  assert.match(pv.league.note, /you keep the hits and drop the rest/);
+  assert.match(pv.league.note, /Valued as an option: hits in full, busts at zero/);
 });
 
 test('parser understands 1.05 notation and early/mid/late', () => {

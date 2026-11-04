@@ -83,10 +83,14 @@ export function normalizeDraft(draft, picks = []) {
   };
 }
 
+/** A pick that produced under a tenth of replacement level is a complete bust: injured, cut, or never played. */
+export const BUST_FRACTION = 0.1;
+
 /**
  * Attach what each pick became.
- * @param valueOf (playerId, season, position) → { season: number|null, now: number|null }
- *   season = value above replacement the year he was drafted; now = value today
+ * @param valueOf (playerId, season, position) → { season, now, seasonPts, replacement }
+ *   season = value above replacement the year he was drafted; now = value today;
+ *   seasonPts / replacement let a complete bust be told apart from a merely bad pick
  */
 export function draftOutcomes(drafts, valueOf) {
   const out = [];
@@ -101,6 +105,8 @@ export function draftOutcomes(drafts, valueOf) {
         third: thirdOf(p.slot, d.teams),
         seasonValue: v.season == null ? null : r1(v.season),
         nowValue: v.now == null ? null : r1(v.now),
+        seasonPts: v.seasonPts == null ? null : r1(v.seasonPts),
+        bust: v.seasonPts != null && v.replacement != null ? v.seasonPts < BUST_FRACTION * v.replacement : null,
       });
     }
   }
@@ -121,8 +127,9 @@ export function buildPickCurve(outcomes, { measure = 'season', prior = null, fal
   for (const o of outcomes) {
     if (o[key] == null || !o.round || o.round > maxRound) continue;
     seasons.add(o.season);
-    const r = (byRound[o.round] ||= { values: [], thirds: { early: [], mid: [], late: [] } });
+    const r = (byRound[o.round] ||= { values: [], played: [], busts: 0, thirds: { early: [], mid: [], late: [] } });
     r.values.push(o[key]);
+    if (o.bust) r.busts++; else r.played.push(o[key]);
     if (o.third) r.thirds[o.third].push(o[key]);
   }
   const last = Math.min(maxRound, Math.max(0, ...Object.keys(byRound).map(Number), ...Object.keys(prior?.rounds || {}).map(Number), ...Object.keys(fallback).map(Number)));
@@ -144,6 +151,8 @@ export function buildPickCurve(outcomes, { measure = 'season', prior = null, fal
       n,
       mean: m == null ? null : r1(m),
       optionMean: om == null ? null : r1(om),
+      playedMean: d?.played.length ? r1(mean(d.played)) : null,   // complete busts thrown out
+      busts: d?.busts ?? 0,
       median: n ? r1(median(d.values)) : null,
       hitRate: n ? r2(d.values.filter((v) => v > 0).length / n) : null,
       prior: r1(priorValue),
@@ -168,7 +177,7 @@ export function curveValue(curve, { round, slot, third, teams }) {
   const r = curve?.rounds?.[round];
   if (!r) return null;
   const t = third || thirdOf(slot, teams || 12);
-  const base = { n: r.n, hitRate: r.hitRate, basis: r.basis, mean: r.mean, optionMean: r.optionMean, median: r.median, prior: r.prior, round };
+  const base = { n: r.n, hitRate: r.hitRate, basis: r.basis, mean: r.mean, optionMean: r.optionMean, playedMean: r.playedMean, busts: r.busts, median: r.median, prior: r.prior, round };
   if (t && r.thirds?.[t]) return { ...base, value: r.thirds[t].value, third: t, nThird: r.thirds[t].n };
   return { ...base, value: r.value, third: null, nThird: 0 };
 }
@@ -189,6 +198,7 @@ export function describePickBasis(round, cv, curve) {
   const hit = cv.hitRate != null ? `${Math.round(cv.hitRate * 100)}% finished above replacement` : '';
   const third = cv.third && cv.nThird ? ` (${cv.third} in the ${curve?.auction ? 'tier' : 'round'}: ${cv.nThird})` : '';
   const shrink = cv.basis === 'blend' ? ' Blended with the standard-league calibration because the sample is small.' : '';
-  const busts = cv.mean != null && cv.optionMean != null && cv.mean < cv.optionMean - 1 ? ` Counting busts in full the average is ${cv.mean}, but a pick is an option: you keep the hits and drop the rest.` : '';
-  return `In this league, ${unit} ${what} ${cv.optionMean} on average across ${cv.n} picks from ${span}${third}; ${hit}.${busts}${shrink}`;
+  const busts = cv.busts ? ` Throwing out the ${cv.busts} complete bust${cv.busts === 1 ? '' : 's'} (injured, cut, or never played), the picks that played averaged ${cv.playedMean}.` : '';
+  const option = cv.mean != null && cv.optionMean != null && cv.mean < cv.optionMean - 1 ? ` Valued as an option: hits in full, busts at zero.` : '';
+  return `In this league, ${unit} ${what} ${cv.optionMean} on average across ${cv.n} picks from ${span}${third}; ${hit}.${busts}${option}${shrink}`;
 }
