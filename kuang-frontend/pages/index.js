@@ -299,7 +299,7 @@ function Prophecy({ consultation, latest, contextLabel }) {
 }
 
 function row(p, side) {
-  return [p.name, side, p.position, p.team || '—', fmt(p.points), <b key="v">{fmt(p.value)}</b>, p.rank || '—', p.byeWeek || '—', <span key="f" className="text-xs">{p.flags?.length ? p.flags.map((f) => f.text).join(' · ') : p.injuryStatus || '—'}</span>]
+  return [p.name, side, p.position, p.team || '—', p.type === 'pick' ? '—' : fmt(p.points), <b key="v">{fmt(p.value)}</b>, p.rank || '—', p.byeWeek || '—', <span key="f" className="text-xs">{p.flags?.length ? p.flags.map((f) => f.text).join(' · ') : p.injuryStatus || '—'}</span>]
 }
 
 function Side({ label, items, value, peak, points, tone, belowReplacement }) {
@@ -317,7 +317,7 @@ function Side({ label, items, value, peak, points, tone, belowReplacement }) {
         {items.map((p) => <PlayerChip key={p.id || p.name} player={p.type === 'pick' ? { name: p.name } : p} />)}
       </div>
       <div className="mt-2 h-1.5 overflow-hidden rounded-full bg-surface-3"><div className={`h-full rounded-full ${bar}`} style={{ width: `${pct}%` }} /></div>
-      <p className="nums mt-1 text-[11px] text-fg-3">{points} {t('rest-of-season pts', '剩余赛季分')}</p>
+      <p className="nums mt-1 text-[11px] text-fg-3">{points} {items.some((p) => p.type === 'pick') ? t('rest-of-season pts from the players; a pick scores nothing this season', '球员剩余赛季分；选秀签本季不得分') : t('rest-of-season pts', '剩余赛季分')}</p>
     </div>
   )
 }

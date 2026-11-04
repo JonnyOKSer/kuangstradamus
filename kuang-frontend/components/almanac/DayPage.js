@@ -573,7 +573,7 @@ function LedgerBlock({ team, tab, onTab, onPlayer, compact = false, leagueId }) 
     },
     {
       id: 'draft', char: '选', label: t('Draft', '选秀'),
-      content: <DraftLedger leagueId={leagueId} pickCurve={L?.pickCurve} onPlayer={onPlayer} compact={compact} />,
+      content: <DraftLedger leagueId={leagueId} pickCurve={L?.pickCurve} onPlayer={onPlayer} compact={compact} currentSeason={L?.isCurrentSeason ? Number(L.season) : null} />,
     },
     {
       id: 'method', char: '法', label: t('Method', '方法'),
@@ -594,7 +594,7 @@ function LedgerBlock({ team, tab, onTab, onPlayer, compact = false, leagueId }) 
 }
 
 /** What every pick in this league's history became, and the value curve picks are priced on. */
-function DraftLedger({ leagueId, pickCurve, onPlayer, compact }) {
+function DraftLedger({ leagueId, pickCurve, onPlayer, compact, currentSeason }) {
   const { t } = useUI()
   const [data, setData] = useState(null)
   const [error, setError] = useState('')
@@ -616,7 +616,7 @@ function DraftLedger({ leagueId, pickCurve, onPlayer, compact }) {
     <div className="space-y-3 text-sm">
       <p className="text-xs text-fg-2">
         {t(
-          `Picks are priced on what this league's own picks became: ${curve?.picks || 0} ${auction ? 'auction buys' : 'picks'} from ${seasons.length} draft${seasons.length === 1 ? '' : 's'} (${seasons.join(', ')}), each scored by what the player ${curve?.measure === 'now' ? 'is worth today' : 'produced that season'} in this league's rules. Keeper slots are excluded.${auction ? ' Auction buys are ranked by price and cut into tiers of one per team, so tier 1 is the priciest buy on every roster.' : ''} Small samples lean on a five-season standard-league calibration.`,
+          `Picks are priced on what this league's own picks became: ${curve?.picks || 0} ${auction ? 'auction buys' : 'picks'} from ${seasons.length} draft${seasons.length === 1 ? '' : 's'} (${seasons.join(', ')}), each scored by what the player ${curve?.measure === 'now' ? 'is worth today' : 'produced that season'} in this league's rules.${currentSeason && seasons.includes(currentSeason) && curve?.measure !== 'now' ? ` The ${currentSeason} season is still being played, so its picks count points to date plus the rest-of-season projection.` : ''} Keeper slots are excluded.${auction ? ' Auction buys are ranked by price and cut into tiers of one per team, so tier 1 is the priciest buy on every roster.' : ''} Small samples lean on a five-season standard-league calibration.`,
           `选秀签按本联盟历史选秀的实际结果估值：${seasons.length} 次选秀共 ${curve?.picks || 0} 个选择，按本联盟规则计算球员${curve?.measure === 'now' ? '当前价值' : '当季产出'}。保留球员不计入。`,
         )}
       </p>
@@ -646,7 +646,11 @@ function DraftLedger({ leagueId, pickCurve, onPlayer, compact }) {
             <div className="mt-2">
               <DataTable
                 dense
-                head={[auction ? '$' : t('Pick', '签位'), t('Player', '球员'), t('Pos', '位置'), t('That season', '当季'), t('Now', '现在'), '']}
+                head={[
+                  auction ? '$' : t('Pick', '签位'), t('Player', '球员'), t('Pos', '位置'),
+                  d.season === currentSeason ? t(`${d.season} (to date + ROS)`, `${d.season}（至今 + 剩余预测）`) : t(`${d.season} (actual)`, `${d.season}（实际）`),
+                  t('ROS now', '当前剩余'), '',
+                ]}
                 rows={picks.slice(0, compact ? 40 : 200).map((o) => [
                   auction ? <span key="a" className="nums whitespace-nowrap">{o.round}.{String(o.slot).padStart(2, '0')} · ${o.amount}</span> : <span key="a" className="nums whitespace-nowrap">{o.round}.{String(o.slot).padStart(2, '0')}</span>,
                   <button key="n" type="button" onClick={() => onPlayer(o.playerId)} className="text-left hover:text-neon">{o.name}</button>,

@@ -215,9 +215,11 @@ export async function analyzeTrade(body, options = {}) {
       : winner
         ? ` ${winLabel} carries ${marginPct}% more value over replacement.`
         : ' The value gap is inside the noise of the projections.';
-    summary = `You give ${names(sideA)}: ${valueA} value / ${totalA} ROS pts. You get ${names(sideB)}: ${valueB} value / ${totalB} ROS pts. Verdict: ${verdict}.${detail}`;
+    const rosLabel = (arr) => (arr.some((p) => p.type === 'pick') ? 'ROS pts from the players (a pick scores nothing this season)' : 'ROS pts');
+    summary = `You give ${names(sideA)}: ${valueA} value / ${totalA} ${rosLabel(sideA)}. You get ${names(sideB)}: ${valueB} value / ${totalB} ${rosLabel(sideB)}. Verdict: ${verdict}.${detail}`;
     const zhVerdict = { even: '势均力敌', slight: youGet ? '你得到的略多' : '你给出的略多', clear: youGet ? '你明显占优' : '你明显吃亏', lopsided: youGet ? '你大赚一笔' : '你被狠狠宰了' }[category];
-    summaryZh = `你给出 ${names(sideA)}：价值 ${valueA}，剩余赛季预计 ${totalA} 分；你得到 ${names(sideB)}：价值 ${valueB}，剩余赛季预计 ${totalB} 分。判定：${zhVerdict}。`;
+    const zhRos = (arr) => (arr.some((p) => p.type === 'pick') ? '球员剩余赛季预计' : '剩余赛季预计');
+    summaryZh = `你给出 ${names(sideA)}：价值 ${valueA}，${zhRos(sideA)} ${totalA} 分；你得到 ${names(sideB)}：价值 ${valueB}，${zhRos(sideB)} ${totalB} 分。判定：${zhVerdict}。`;
   }
 
   return {
